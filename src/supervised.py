@@ -60,11 +60,12 @@ matrix_imputed_file = data_dir / "matrix.pq"
 
 
 categories = ["patient", "severity_group", "intubated", "death", "heme", "bmt", "obesity"]
+technical = ["date"]
 continuous = ["timepoint"]
-variables = categories + continuous
+variables = categories + continuous + technical
 
 
-alpha_thresh = 0.05
+alpha_thresh = 0.01
 log_alpha_thresh = -np.log10(alpha_thresh)
 
 
@@ -86,144 +87,160 @@ to_fit.columns = (
     .str.replace(")", "_C_")
 )
 
-#
+# Fit linear models
 
-# # First try a model with only
-cur_variables = categories[:4]
+# # First try a model with only categories available for most data
+cur_variables = categories[:4] + technical
 
 # and reduce replicates by mean
-# to_fit_meta = meta.drop_duplicates(subset=["patient_code", "accession"])
-# to_fit = (
-#     to_fit.join(meta[["patient_code", "accession"]]).groupby(["patient_code", "accession"]).mean()
-# ).set_index(to_fit_meta.index)
+meta_reduced = meta.drop_duplicates(subset=["sample_id"])
+to_fit_reduced = to_fit.groupby(meta["sample_id"]).mean().set_index(meta_reduced.index)
 
 
-# data = zscore(to_fit).join(to_fit_meta[cur_variables]).dropna()
-data = zscore(to_fit).join(meta[cur_variables]).dropna()
+to_fit.groupby(meta["sample_id"]).std()
 
-_coefs = list()
-for col in to_fit.columns:
-    formula = f"{col} ~ {' + '.join(cur_variables)}"
-    md = smf.glm(formula, data)
-    mdf = md.fit()
-    _coefs.append(
-        mdf.params.to_frame(name="coef").join(mdf.pvalues.rename("pval")).assign(variable=col)
+
+_coefs = dict()
+for m, d, label in [(meta, to_fit, "original"), (meta_reduced, to_fit_reduced, "reduced")]:
+    data = zscore(d).join(m[cur_variables]).dropna()
+
+    __coefs = list()
+    for col in to_fit.columns:
+        formula = f"{col} ~ {' + '.join(cur_variables)}"
+        md = smf.glm(formula, data)
+        mdf = md.fit()
+        __coefs.append(
+            mdf.params.to_frame(name="coef").join(mdf.pvalues.rename("pval")).assign(variable=col)
+        )
+    _coefs[label] = pd.concat(__coefs).rename_axis(index="comparison").drop("Intercept", axis=0)
+
+    _coefs[label].to_csv(output_dir / f"differential.{label}.results.csv")
+
+
+for label in ["original", "reduced"]:
+
+    coefs = _coefs[label]
+    long_f = coefs.pivot_table(index="variable", columns="comparison")
+    long_f.index = matrix.columns
+
+    changes = long_f["coef"]
+    pvals = -np.log10(long_f["pval"])
+    qvals = -np.log10(
+        long_f["pval"]
+        .apply(multipletests, method="fdr_bh")
+        .apply(lambda x: pd.Series(x[1]))
+        .T.set_index(long_f.index)
     )
 
-coefs = pd.concat(_coefs).rename_axis(index="comparison").drop("Intercept", axis=0)
+    # Visualize
 
+    # # Heatmaps
+    kwargs = dict(center=0, cmap="RdBu_r", robust=True, metric="correlation")
+    grid = sns.clustermap(changes, cbar_kws=dict(label="log2(fold-change)"), **kwargs)
+    grid.savefig(output_dir / f"differential.{label}.lfc.all_vars.clustermap.svg")
+    grid = sns.clustermap(pvals, cbar_kws=dict(label="-log10(p-value)"), **kwargs)
+    grid.savefig(output_dir / f"differential.{label}.pvals_only.all_vars.clustermap.svg")
 
-long_f = coefs.pivot_table(index="variable", columns="comparison")
-long_f.index = matrix.columns
+    # # # Heatmap combinin both change and significance
+    cols = ~changes.columns.str.contains("|".join(technical))
+    grid = sns.clustermap(
+        changes.loc[:, cols],
+        cbar_kws=dict(label="log2(Fold-change"),
+        row_colors=pvals.loc[:, cols],
+        **kwargs,
+    )
+    grid.savefig(output_dir / f"differential.{label}.join_lfc_pvals.all_vars.clustermap.svg")
 
-changes = long_f["coef"]
-pvals = -np.log10(long_f["pval"])
-qvals = -np.log10(
-    long_f["pval"]
-    .apply(multipletests, method="fdr_bh")
-    .apply(lambda x: pd.Series(x[1]))
-    .T.set_index(long_f.index)
-)
+    # # # only significatnt
+    sigs = (qvals >= log_alpha_thresh).any(1)
+    grid = sns.clustermap(
+        changes.loc[sigs, cols],
+        cbar_kws=dict(label="log2(Fold-change"),
+        row_colors=pvals.loc[sigs, cols],
+        xticklabels=True,
+        yticklabels=True,
+        **kwargs,
+    )
+    grid.savefig(
+        output_dir / f"differential.{label}.join_lfc_pvals.p<{alpha_thresh}_only.clustermap.svg"
+    )
 
-# Visualize
+    # # Volcano plots
+    for category in categories:
+        cols = pvals.columns[pvals.columns.str.contains(category)]
+        n = len(cols)
+        if not n:
+            continue
 
-# # Heatmaps
-grid = sns.clustermap(changes, center=0, cmap="RdBu_r")
-grid.savefig(output_dir / "differential.lfc.all_vars.clustermap.svg")
-grid = sns.clustermap(pvals, center=0, cmap="RdBu_r")
-grid.savefig(output_dir / "differential.pvals_only.all_vars.clustermap.svg")
+        fig, axes = plt.subplots(1, n, figsize=(n * 4, 1 * 4), squeeze=False)
+        axes = axes.squeeze(0)
+        for i, col in enumerate(cols):
+            sigs = qvals[col] >= log_alpha_thresh
+            kwargs = dict(s=2, alpha=0.5, color="grey")
+            axes[i].scatter(changes.loc[~sigs, col], pvals.loc[~sigs, col], **kwargs)
+            kwargs = dict(s=10, alpha=1.0, c=qvals.loc[sigs, col], cmap="Reds", vmin=0)
+            im = axes[i].scatter(changes.loc[sigs, col], pvals.loc[sigs, col], **kwargs)
+            name = re.findall(r"^(.*)\[", col)[0]
+            inst = re.findall(r"\[T.(.*)\]", col)[0]
+            # v = -np.log10(multipletests([alpha_thresh] * changes[col].shape[0])[1][0])
+            v = pvals.loc[~sigs, col].max()
+            axes[i].axhline(v, color="grey", linestyle="--", alpha=0.5)
+            axes[i].axvline(0, color="grey", linestyle="--", alpha=0.5)
+            axes[i].set_title(f"{name}: {inst}/{meta[category].min()}")
+            axes[i].set_xlabel("log2(Fold-change)")
+            axes[i].set_ylabel("-log10(p-value)")
 
+            texts = text(
+                changes.loc[sigs, col],
+                pvals.loc[sigs, col],
+                changes.loc[sigs, col].index,
+                axes[i],
+                fontsize=5,
+            )
+            adjust_text(texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes[i])
+            add_colorbar(im, axes[i])
 
-# # # Heatmap combinin both change and significance
-grid = sns.clustermap(
-    changes, center=0, cmap="RdBu_r", cbar_kws=dict(label="log2(Fold-change"), row_colors=pvals,
-)
-grid.savefig(output_dir / "differential.join_lfc_pvals.all_vars.clustermap.svg")
+        fig.savefig(output_dir / f"differential.{label}.test_{category}.volcano.svg")
+        plt.close(fig)
 
-# # # only significatnt
-sigs = (qvals >= log_alpha_thresh).any(1)
-grid = sns.clustermap(
-    changes.loc[sigs],
-    center=0,
-    cmap="RdBu_r",
-    cbar_kws=dict(label="log2(Fold-change"),
-    row_colors=pvals.loc[sigs],
-    xticklabels=True,
-    yticklabels=True,
-    robust=True,
-)
-grid.savefig(output_dir / f"differential.join_lfc_pvals.p<{alpha_thresh}_only.clustermap.svg")
+    # # Illustration of top hits
+    n_plot = 7
 
+    for category in categories:
+        cols = pvals.columns[pvals.columns.str.contains(category)]
+        n = len(cols)
+        if not n:
+            continue
+        for i, col in enumerate(cols):
+            v = qvals[col].sort_values()
+            sigs = v[v >= log_alpha_thresh]
+            if sigs.empty:
+                continue
+            print(category, sigs)
+            sigs = sigs.tail(n_plot).index
+            data = matrix.loc[:, sigs].join(meta[category]).melt(id_vars=category)
 
-# # Volcano plots
-for category in categories:
-    cols = pvals.columns[pvals.columns.str.contains(category)]
-    n = len(cols)
-    if not n:
-        continue
+            grid = sns.catplot(
+                data=data, col="variable", y="value", x=category, sharey=False, height=3
+            )
+            for ax in grid.axes.flat:
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
+            # grid.map(sns.boxplot)
+            grid.savefig(output_dir / f"differential.{label}.test_{category}.{col}.swarm.svg")
+            plt.close(grid.fig)
 
-    fig, axes = plt.subplots(1, n, figsize=(n * 4, 1 * 4), squeeze=False)
-    axes = axes.squeeze(0)
-    for i, col in enumerate(cols):
-        sigs = qvals[col] >= log_alpha_thresh
-        kwargs = dict(s=2, alpha=0.5, color="grey")
-        axes[i].scatter(changes.loc[~sigs, col], pvals.loc[~sigs, col], **kwargs)
-        kwargs = dict(s=10, alpha=1.0, c=qvals.loc[sigs, col], cmap="Reds", vmin=0)
-        im = axes[i].scatter(changes.loc[sigs, col], pvals.loc[sigs, col], **kwargs)
-        name = re.findall(r"^(.*)\[", col)[0]
-        inst = re.findall(r"\[T.(.*)\]", col)[0]
-        # v = -np.log10(multipletests([alpha_thresh] * changes[col].shape[0])[1][0])
-        v = pvals.loc[~sigs, col].max()
-        axes[i].axhline(v, color="grey", linestyle="--", alpha=0.5)
-        axes[i].axvline(0, color="grey", linestyle="--", alpha=0.5)
-        axes[i].set_title(f"{name}: {inst}/{meta[category].min()}")
-        axes[i].set_xlabel("log2(Fold-change)")
-        axes[i].set_ylabel("-log10(p-value)")
+    # # For Mixed Effect model
+    # from patsy import dmatrices
 
-        texts = text(
-            changes.loc[sigs, col],
-            pvals.loc[sigs, col],
-            changes.loc[sigs, col].index,
-            axes[i],
-            fontsize=5,
-        )
-        adjust_text(texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes[i])
-        add_colorbar(im, axes[i])
-
-    fig.savefig(output_dir / f"differential.test_{category}.volcano.svg")
-    plt.close(fig)
-
-
-# # Illustration of top hits
-n_plot = 7
-
-for category in categories:
-    cols = pvals.columns[pvals.columns.str.contains(category)]
-    n = len(cols)
-    if not n:
-        continue
-    for i, col in enumerate(cols):
-        sigs = (qvals[col].sort_values() >= log_alpha_thresh)[-n_plot:].index
-        data = matrix.loc[:, sigs].join(meta[category]).melt(id_vars=category)
-
-        grid = sns.catplot(data=data, col="variable", y="value", x=category, sharey=False, height=3)
-        # grid.map(sns.boxplot)
-        grid.savefig(output_dir / f"differential.test_{category}.{col}.swarm.svg")
-        plt.close(grid.fig)
-
-
-# # For Mixed Effect model
-# from patsy import dmatrices
-
-# #%% Generate Design Matrix for later use
-# Y, X = dmatrices(formula, data=data, return_type="matrix")
-# Terms = X.design_info.column_names
-# _, Z = dmatrices("rt ~ -1+subj", data=data, return_type="matrix")
-# X = np.asarray(X)  # fixed effect
-# Z = np.asarray(Z)  # mixed effect
-# Y = np.asarray(Y).flatten()
-# nfixed = np.shape(X)
-# nrandm = np.shape(Z)
+    # #%% Generate Design Matrix for later use
+    # Y, X = dmatrices(formula, data=data, return_type="matrix")
+    # Terms = X.design_info.column_names
+    # _, Z = dmatrices("rt ~ -1+subj", data=data, return_type="matrix")
+    # X = np.asarray(X)  # fixed effect
+    # Z = np.asarray(Z)  # mixed effect
+    # Y = np.asarray(Y).flatten()
+    # nfixed = np.shape(X)
+    # nrandm = np.shape(Z)
 
 # Add lock file
 open(output_dir / "__done__", "w")

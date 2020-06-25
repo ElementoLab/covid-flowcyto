@@ -13,5 +13,7 @@ umap-learn
 
 fancyimpute
 adjustText
+FlowKit
+MiniSOM
 
 imc

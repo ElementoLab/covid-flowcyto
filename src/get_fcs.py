@@ -51,6 +51,8 @@ def main():
             with open(output_file, "wb") as f:
                 f.write(res3.content)
 
+    open(OUTPUT_DIR / "__done__", "w")
+
 
 if __name__ == "__main__":
     try:

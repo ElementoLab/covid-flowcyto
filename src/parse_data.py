@@ -21,7 +21,11 @@ results_dir = Path("results")
 for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
     _dir.mkdir(exist_ok=True, parents=True)
 
-original = pd.read_excel(original_dir / "COVID-19 Results - Andres.xlsx", na_values="NT")
+original = pd.read_excel(
+    original_dir / "COVID-19 Results - Andres.xlsx",
+    na_values="NT",
+    # converters={"percents": lambda value: "{}%".format(value * 100)},
+)
 
 # extract only metadata
 meta = original.iloc[:, :13]
@@ -65,17 +69,23 @@ meta.loc[
 
 # # leukemia/lymphoma
 lymp = ["CLL", "AML", "DLBCL", "MM", "ALL"]
-meta.loc[meta["note"].str.contains("|".join(lymp)), "comorbidity"] = "leukemia/lymphoma"
+meta["leukemia-lymphoma"] = "False"
+meta.loc[meta["note"].str.contains("|".join(lymp), case=False), "leukemia-lymphoma"] = "True"
+
 
 # # Hypertension
-meta.loc[meta["note"].str.contains("HTL"), "hypertension"] = "hypertension"
+meta["hypertension"] = "False"
+meta.loc[meta["note"].str.contains("HTN", case=False), "hypertension"] = "True"
+
 
 # # Hyperlypidemia
-meta.loc[meta["note"].str.contains("HL"), "hyperlypidemia"] = "hyperlypidemia"
+meta["hyperlypidemia"] = "False"
+meta.loc[meta["note"].str.contains("HL", case=False), "hyperlypidemia"] = "True"
 
 
 # # Sleep apnea
-meta.loc[meta["note"].str.contains("OSA"), "sleep_apnea"] = "sleep_apnea"
+meta["sleep_apnea"] = "False"
+meta.loc[meta["note"].str.contains("OSA", case=False), "sleep_apnea"] = "True"
 
 
 # Cleanup strings
@@ -88,13 +98,18 @@ meta.loc[meta["note"] == "QC", "patient"] = "Control"
 
 # make ordered Categorical
 categories = {
-    "severity_group": ["non-covid", "negative", "mild", "severe", "convalescent"],
+    "severity_group": ["negative", "non-covid", "mild", "severe", "convalescent"],
     "intubated": ["not intubated", "intubated"],
     "death": ["alive", "mild", "dead"],
     "heme": ["no", "yes"],
     "bmt": ["no", "yes"],
     "obesity": ["nonobese", "overweight", "obese"],
     "patient": ["Control", "Patient"],
+    # TODO: pyarrow/parquet serialization currently does not support categorical bool
+    "leukemia-lymphoma": ["False", "True"],
+    "hypertension": ["False", "True"],
+    "hyperlypidemia": ["False", "True"],
+    "sleep_apnea": ["False", "True"],
 }
 
 for col in categories:
@@ -127,6 +142,9 @@ for c1 in matrix.columns:
             print(f"Columns '{c1}' and '{c2}' are the same.")
             matrix = matrix.drop(c2, axis=1)
 
+
+# Values are read as fraction from the excel
+matrix *= 100
 
 # Save
 # matrix.to_csv(data_dir / "matrix.csv")
