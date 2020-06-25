@@ -146,6 +146,12 @@ for c1 in matrix.columns:
 # Values are read as fraction from the excel
 matrix *= 100
 
+
+# Fix a few variables which are not percentage but ratios
+
+matrix.loc[:, matrix.max() > 105] /= 100
+
+
 # Save
 # matrix.to_csv(data_dir / "matrix.csv")
 matrix.sort_index(0).sort_index(1).to_parquet(data_dir / "matrix.pq")

@@ -92,6 +92,47 @@ variable_classes = (
 
 # # Plot abundance of major populations for each patient group
 # + a few ratios like CD4/CD8 (of CD3+)
+cat_var = "severity_group"
+
+for panel in variable_classes["panel"].unique():
+
+    data = (
+        matrix.loc[:, variable_classes.query(f"panel == '{panel}'").index]
+        .join(meta[[cat_var]])
+        .melt(id_vars=[cat_var], var_name="population", value_name="abundance (%)")
+    )
+
+    kws = dict(data=data, x=cat_var, y="abundance (%)", hue=cat_var, palette="tab10")
+    grid = sns.FacetGrid(data=data, col="population", sharey=False, height=3, col_wrap=4)
+    grid.map_dataframe(sns.boxenplot, saturation=0.5, dodge=False, **kws)
+    # grid.map_dataframe(sns.stripplot, y="value", x=category, hue=category, data=data, palette='tab10')
+
+    for ax in grid.axes.flat:
+        [
+            x.set_alpha(0.25)
+            for x in ax.get_children()
+            if isinstance(
+                x, (matplotlib.collections.PatchCollection, matplotlib.collections.PathCollection,),
+            )
+        ]
+    grid.map_dataframe(sns.swarmplot, **kws)
+
+    for ax in grid.axes.flat:
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
+
+    # add stats to title
+    for ax in grid.axes.flat:
+        var = ax.get_title().replace("population = ", "")
+        try:
+            child, parent = re.findall(r"(.*)/(.*)", var)[0]
+            ax.set_title(child)
+            ax.set_ylabel(f"% {parent}")
+        except IndexError:
+            ax.set_title(var)
+
+    # grid.map(sns.boxplot)
+    grid.savefig(output_dir / f"variable_illustration.{cat_var}.panel_{panel}.swarm+boxen.svg")
+    plt.close(grid.fig)
 
 
 # # Simply correlate with clinical continuous

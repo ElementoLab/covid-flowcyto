@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import multipletests
 from adjustText import adjust_text
@@ -59,7 +60,7 @@ matrix_file = data_dir / "matrix.pq"
 matrix_imputed_file = data_dir / "matrix.pq"
 
 
-categories = ["patient", "severity_group", "intubated", "death", "heme", "bmt", "obesity"]
+categories = ["patient", "severity_group", "intubated", "death"]  # , "heme", "bmt", "obesity"]
 technical = ["date"]
 continuous = ["timepoint"]
 variables = categories + continuous + technical
@@ -78,59 +79,107 @@ cols.index = matrix.columns
 parent_population = cols[1].rename("parent_population")
 
 
-to_fit = matrix.copy()
-to_fit.columns = (
-    to_fit.columns.str.replace("/", "___")
+facs = matrix.copy()
+facs.columns = (
+    facs.columns.str.replace("/", "___")
     .str.replace("+", "pos")
     .str.replace("-", "neg")
     .str.replace("(", "_O_")
     .str.replace(")", "_C_")
 )
 
+# This is a reduced version, where replicates are averaged
+meta_reduced = meta.drop_duplicates(subset=["sample_id"]).sort_values("sample_id")
+facs_reduced = facs.groupby(meta["sample_id"]).mean().set_index(meta_reduced.index)
+
+
 # Fit linear models
+#
+#    Here we have a few issues and a few options for each:
+#     - missing data:
+#         - imputation of continuous values only ~0.1% missing so, no brainer
+#         - imputation of categoricals?
+#     - proportion nature of the data:
+#         - z-score (loose sensitivity, harder to interpret coefficients)
+#         - logistic reg (did not converge for many cases :()
+#         - use Gamma GLM + log link (ok, but large coefficients sometimes :/)
+#         - use Binomial GLM (no power?)
+#
+
+res = dict()
 
 # # First try a model with only categories available for most data
-cur_variables = categories[:4] + technical
+model_name = "categoricals"
+cur_variables = categories + technical
 
-# and reduce replicates by mean
-meta_reduced = meta.drop_duplicates(subset=["sample_id"])
-to_fit_reduced = to_fit.groupby(meta["sample_id"]).mean().set_index(meta_reduced.index)
+for m, d, label in [(meta, facs, "original"), (meta_reduced, facs_reduced, "reduced")]:
+    # data = zscore(d).join(m[cur_variables]).dropna()
+    data = d.join(m[cur_variables]).dropna()
 
+    _res = list()
+    for col in facs.columns:
+        data[col] = data[col] / 100  # for logit or binomial
 
-to_fit.groupby(meta["sample_id"]).std()
-
-
-_coefs = dict()
-for m, d, label in [(meta, to_fit, "original"), (meta_reduced, to_fit_reduced, "reduced")]:
-    data = zscore(d).join(m[cur_variables]).dropna()
-
-    __coefs = list()
-    for col in to_fit.columns:
         formula = f"{col} ~ {' + '.join(cur_variables)}"
-        md = smf.glm(formula, data)
-        mdf = md.fit()
-        __coefs.append(
+        # formula = f"{col} ~ severity_group"
+        # md = smf.glm(formula, data)
+        md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
+        # md = smf.logit(formula, data)
+        # md = smf.glm(formula, data, family=sm.families.Binomial())
+
+        mdf = md.fit(maxiter=100)
+        # fig, ax = plt.subplots()
+        # sns.boxplot(data=data, x='severity_group', y=col, ax=ax)
+        # sns.swarmplot(data=data, x='severity_group', y=col, ax=ax)
+        # ax.set_title(str(mdf.params[mdf.params.index.str.contains('severity_group')]))
+
+        _res.append(
             mdf.params.to_frame(name="coef").join(mdf.pvalues.rename("pval")).assign(variable=col)
         )
-    _coefs[label] = pd.concat(__coefs).rename_axis(index="comparison").drop("Intercept", axis=0)
 
-    _coefs[label].to_csv(output_dir / f"differential.{label}.results.csv")
+    res[label] = pd.concat(_res).rename_axis(index="comparison")
+
+    res[label].to_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
+
+
+# # Now try a model of patients only where we regress on time too
+model_name = "categoricals+continuous"
+cur_variables = categories[:4] + technical + continuous
+
+for m, d, label in [(meta, facs, "original"), (meta_reduced, facs_reduced, "reduced")]:
+    # data = zscore(d).join(m[cur_variables]).dropna()
+    data = d.join(m[cur_variables]).dropna()
+
+    _res = list()
+    for col in facs.columns:
+        data[col] = data[col] / 100  # for logit or binomial
+
+        formula = f"{col} ~ {' + '.join(cur_variables)}"
+        md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
+        mdf = md.fit(maxiter=100)
+        _res.append(
+            mdf.params.to_frame(name="coef").join(mdf.pvalues.rename("pval")).assign(variable=col)
+        )
+    res[label] = res[label].append(pd.concat(_res).rename_axis(index="comparison").loc[continuous])
+
+    res[label].to_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
 
 
 for label in ["original", "reduced"]:
 
-    coefs = _coefs[label]
-    long_f = coefs.pivot_table(index="variable", columns="comparison")
+    long_f = res[label].pivot_table(index="variable", columns="comparison")
     long_f.index = matrix.columns
 
     changes = long_f["coef"]
-    pvals = -np.log10(long_f["pval"])
-    qvals = -np.log10(
+    pvals = long_f["pval"]
+    logpvals = -np.log10(pvals)
+    qvals = (
         long_f["pval"]
         .apply(multipletests, method="fdr_bh")
         .apply(lambda x: pd.Series(x[1]))
         .T.set_index(long_f.index)
     )
+    logqvals = -np.log10(qvals)
 
     # Visualize
 
@@ -138,25 +187,25 @@ for label in ["original", "reduced"]:
     kwargs = dict(center=0, cmap="RdBu_r", robust=True, metric="correlation")
     grid = sns.clustermap(changes, cbar_kws=dict(label="log2(fold-change)"), **kwargs)
     grid.savefig(output_dir / f"differential.{label}.lfc.all_vars.clustermap.svg")
-    grid = sns.clustermap(pvals, cbar_kws=dict(label="-log10(p-value)"), **kwargs)
+    grid = sns.clustermap(logpvals, cbar_kws=dict(label="-log10(p-value)"), **kwargs)
     grid.savefig(output_dir / f"differential.{label}.pvals_only.all_vars.clustermap.svg")
 
     # # # Heatmap combinin both change and significance
     cols = ~changes.columns.str.contains("|".join(technical))
     grid = sns.clustermap(
         changes.loc[:, cols],
-        cbar_kws=dict(label="log2(Fold-change"),
-        row_colors=pvals.loc[:, cols],
+        cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
+        row_colors=logpvals.loc[:, cols],
         **kwargs,
     )
     grid.savefig(output_dir / f"differential.{label}.join_lfc_pvals.all_vars.clustermap.svg")
 
     # # # only significatnt
-    sigs = (qvals >= log_alpha_thresh).any(1)
+    sigs = (logqvals >= log_alpha_thresh).any(1)
     grid = sns.clustermap(
         changes.loc[sigs, cols],
-        cbar_kws=dict(label="log2(Fold-change"),
-        row_colors=pvals.loc[sigs, cols],
+        cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
+        row_colors=logpvals.loc[sigs, cols],
         xticklabels=True,
         yticklabels=True,
         **kwargs,
@@ -167,7 +216,7 @@ for label in ["original", "reduced"]:
 
     # # Volcano plots
     for category in categories:
-        cols = pvals.columns[pvals.columns.str.contains(category)]
+        cols = logpvals.columns[logpvals.columns.str.contains(category)]
         n = len(cols)
         if not n:
             continue
@@ -175,24 +224,24 @@ for label in ["original", "reduced"]:
         fig, axes = plt.subplots(1, n, figsize=(n * 4, 1 * 4), squeeze=False)
         axes = axes.squeeze(0)
         for i, col in enumerate(cols):
-            sigs = qvals[col] >= log_alpha_thresh
+            sigs = logqvals[col] >= log_alpha_thresh
             kwargs = dict(s=2, alpha=0.5, color="grey")
-            axes[i].scatter(changes.loc[~sigs, col], pvals.loc[~sigs, col], **kwargs)
-            kwargs = dict(s=10, alpha=1.0, c=qvals.loc[sigs, col], cmap="Reds", vmin=0)
-            im = axes[i].scatter(changes.loc[sigs, col], pvals.loc[sigs, col], **kwargs)
+            axes[i].scatter(changes.loc[~sigs, col], logpvals.loc[~sigs, col], **kwargs)
+            kwargs = dict(s=10, alpha=1.0, c=logqvals.loc[sigs, col], cmap="Reds", vmin=0)
+            im = axes[i].scatter(changes.loc[sigs, col], logpvals.loc[sigs, col], **kwargs)
             name = re.findall(r"^(.*)\[", col)[0]
             inst = re.findall(r"\[T.(.*)\]", col)[0]
             # v = -np.log10(multipletests([alpha_thresh] * changes[col].shape[0])[1][0])
-            v = pvals.loc[~sigs, col].max()
+            v = logpvals.loc[~sigs, col].max()
             axes[i].axhline(v, color="grey", linestyle="--", alpha=0.5)
             axes[i].axvline(0, color="grey", linestyle="--", alpha=0.5)
             axes[i].set_title(f"{name}: {inst}/{meta[category].min()}")
-            axes[i].set_xlabel("log2(Fold-change)")
+            axes[i].set_xlabel("log2(Fold-change) " + r"($\beta$)")
             axes[i].set_ylabel("-log10(p-value)")
 
             texts = text(
                 changes.loc[sigs, col],
-                pvals.loc[sigs, col],
+                logpvals.loc[sigs, col],
                 changes.loc[sigs, col].index,
                 axes[i],
                 fontsize=5,
@@ -203,28 +252,98 @@ for label in ["original", "reduced"]:
         fig.savefig(output_dir / f"differential.{label}.test_{category}.volcano.svg")
         plt.close(fig)
 
+    # # MA plots
+    for category in categories:
+        cols = logpvals.columns[logpvals.columns.str.contains(category)]
+        n = len(cols)
+        if not n:
+            continue
+
+        fig, axes = plt.subplots(1, n, figsize=(n * 4, 1 * 4), squeeze=False)
+        axes = axes.squeeze(0)
+        for i, col in enumerate(cols):
+            sigs = logqvals[col] >= log_alpha_thresh
+            kwargs = dict(s=2, alpha=0.5, color="grey")
+            axes[i].scatter(changes.loc[~sigs, "Intercept"], changes.loc[~sigs, col], **kwargs)
+            kwargs = dict(s=10, alpha=1.0, c=logqvals.loc[sigs, col], cmap="Reds", vmin=0)
+            im = axes[i].scatter(changes.loc[sigs, "Intercept"], changes.loc[sigs, col], **kwargs)
+            name = re.findall(r"^(.*)\[", col)[0]
+            inst = re.findall(r"\[T.(.*)\]", col)[0]
+            axes[i].axhline(0, color="grey", linestyle="--", alpha=0.5)
+            axes[i].set_title(f"{name}: {inst}/{meta[category].min()}")
+            axes[i].set_xlabel("Mean")
+            axes[i].set_ylabel("log2(fold-change)")
+
+            texts = text(
+                changes.loc[sigs, col],
+                logpvals.loc[sigs, col],
+                changes.loc[sigs, col].index,
+                axes[i],
+                fontsize=5,
+            )
+            adjust_text(texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes[i])
+            add_colorbar(im, axes[i])
+
+        fig.savefig(output_dir / f"differential.{label}.test_{category}.maplots.svg")
+        plt.close(fig)
+
     # # Illustration of top hits
-    n_plot = 7
+    n_plot = 1000
 
     for category in categories:
         cols = pvals.columns[pvals.columns.str.contains(category)]
+        control = meta[category].min()
         n = len(cols)
         if not n:
             continue
         for i, col in enumerate(cols):
-            v = qvals[col].sort_values()
+            v = logqvals[col].sort_values()
             sigs = v[v >= log_alpha_thresh]
             if sigs.empty:
                 continue
-            print(category, sigs)
-            sigs = sigs.tail(n_plot).index
+            # print(category, sigs)
+            sigs = sigs.tail(n_plot).index[::-1]
             data = matrix.loc[:, sigs].join(meta[category]).melt(id_vars=category)
 
-            grid = sns.catplot(
-                data=data, col="variable", y="value", x=category, sharey=False, height=3
-            )
+            kws = dict(data=data, x=category, y="value", hue=category, palette="tab10")
+            grid = sns.FacetGrid(data=data, col="variable", sharey=False, height=3, col_wrap=4)
+            grid.map_dataframe(sns.boxenplot, saturation=0.5, dodge=False, **kws)
+            # grid.map_dataframe(sns.stripplot, y="value", x=category, hue=category, data=data, palette='tab10')
+
+            for ax in grid.axes.flat:
+                [
+                    x.set_alpha(0.25)
+                    for x in ax.get_children()
+                    if isinstance(
+                        x,
+                        (
+                            matplotlib.collections.PatchCollection,
+                            matplotlib.collections.PathCollection,
+                        ),
+                    )
+                ]
+            grid.map_dataframe(sns.swarmplot, **kws)
+
             for ax in grid.axes.flat:
                 ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
+
+            # add stats to title
+            group = re.findall(r"^.*\[T.(.*)\]", col)[0]
+            for ax in grid.axes.flat:
+                var = ax.get_title().replace("variable = ", "")
+                pop = var
+                try:
+                    pop, parent = re.findall(r"(.*)/(.*)", pop)[0]
+                    ax.set_ylabel(f"% {parent}")
+                except IndexError:
+                    pass
+                ax.set_title(
+                    pop
+                    + f"\n{group}/{control}:\n"
+                    + f"Coef = {changes.loc[var, col]:.3f}; "
+                    + f"FDR = {qvals.loc[var, col]:.3e}"
+                )
+
             # grid.map(sns.boxplot)
             grid.savefig(output_dir / f"differential.{label}.test_{category}.{col}.swarm.svg")
             plt.close(grid.fig)
