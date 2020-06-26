@@ -13,6 +13,7 @@ import seaborn as sns
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import multipletests
+from tqdm import tqdm
 from adjustText import adjust_text
 
 import imc
@@ -37,6 +38,50 @@ def add_colorbar(im, ax=None):
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
     ax.figure.colorbar(im, cax=cax, orientation="vertical")
+
+
+def rename_back(x: str) -> str:
+    return (
+        pd.Series(x)
+        .str.replace("___", "/")
+        .str.replace("pos", "+")
+        .str.replace("neg", "-")
+        .str.replace("_O_", "(")
+        .str.replace("_C_", ")")
+    )[0]
+
+
+def log_pvalues(x, f=0.1):
+    """
+    Calculate -log10(p-value) of array.
+
+    Replaces infinite values with:
+
+    .. highlight:: python
+    .. code-block:: python
+
+        max(x) + max(x) * f
+
+    that is, fraction ``f`` more than the maximum non-infinite -log10(p-value).
+
+    Parameters
+    ----------
+    x : :class:`pandas.Series`
+        Series with numeric values
+    f : :obj:`float`
+        Fraction to augment the maximum value by if ``x`` contains infinite values.
+
+        Defaults to 0.1.
+
+    Returns
+    -------
+    :class:`pandas.Series`
+        Transformed values.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ll = -np.log10(x)
+        rmax = ll[ll != np.inf].max()
+        return ll.replace(np.inf, rmax + rmax * f)
 
 
 # plt.text = np.vectorize(plt.text)
@@ -96,6 +141,10 @@ facs_reduced = facs.groupby(meta["sample_id"]).mean().set_index(meta_reduced.ind
 # Fit linear models
 #
 #    Here we have a few issues and a few options for each:
+#     - design:
+#         - controls were sampled one or more times while cases only once:
+#             - reduce controls by mean? -> can't model batch
+#             - add patient as mixed effect? -> don't have more than one sample for cases
 #     - missing data:
 #         - imputation of continuous values only ~0.1% missing so, no brainer
 #         - imputation of categoricals?
@@ -112,30 +161,35 @@ res = dict()
 model_name = "categoricals"
 cur_variables = categories + technical
 
-for m, d, label in [(meta, facs, "original"), (meta_reduced, facs_reduced, "reduced")]:
-    # data = zscore(d).join(m[cur_variables]).dropna()
-    data = d.join(m[cur_variables]).dropna()
+for m, d, label, fit_vars in [
+    (meta, facs, "original", cur_variables),
+    (meta_reduced, facs_reduced, "reduced", cur_variables[:-1]),
+]:
+    # data = zscore(d).join(m[fit_vars]).dropna()
+    data = d.join(m[fit_vars]).dropna()
 
     _res = list()
-    for col in facs.columns:
-        data[col] = data[col] / 100  # for logit or binomial
+    for col in tqdm(d.columns):
+        # data[col] = data[col] / 100  # for logit or binomial
 
-        formula = f"{col} ~ {' + '.join(cur_variables)}"
+        formula = f"{col} ~ {' + '.join(fit_vars)}"
         # formula = f"{col} ~ severity_group"
         # md = smf.glm(formula, data)
         md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
         # md = smf.logit(formula, data)
         # md = smf.glm(formula, data, family=sm.families.Binomial())
 
-        mdf = md.fit(maxiter=100)
-        # fig, ax = plt.subplots()
-        # sns.boxplot(data=data, x='severity_group', y=col, ax=ax)
-        # sns.swarmplot(data=data, x='severity_group', y=col, ax=ax)
-        # ax.set_title(str(mdf.params[mdf.params.index.str.contains('severity_group')]))
+        # mdf = md.fit(maxiter=100)
+        mdf = md.fit_regularized(maxiter=100, refit=True)  # , L1_wt=1 # <- Ridge
+        params = pd.Series(mdf.params, index=md.exog_names, name="coef")
+        pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
 
-        _res.append(
-            mdf.params.to_frame(name="coef").join(mdf.pvalues.rename("pval")).assign(variable=col)
-        )
+        # fig, ax = plt.subplots()
+        # sns.boxplot(data=data, x="severity_group", y=col, ax=ax)
+        # sns.swarmplot(data=data, x="severity_group", y=col, ax=ax)
+        # ax.set_title(str(params[params.index.str.contains("severity_group")]))
+
+        _res.append(params.to_frame().join(pvalues).assign(variable=rename_back(col)))
 
     res[label] = pd.concat(_res).rename_axis(index="comparison")
 
@@ -146,20 +200,23 @@ for m, d, label in [(meta, facs, "original"), (meta_reduced, facs_reduced, "redu
 model_name = "categoricals+continuous"
 cur_variables = categories[:4] + technical + continuous
 
-for m, d, label in [(meta, facs, "original"), (meta_reduced, facs_reduced, "reduced")]:
+for m, d, label, fit_vars in [
+    (meta, facs, "original", cur_variables),
+    (meta_reduced, facs_reduced, "reduced", cur_variables[:-1]),
+]:
     # data = zscore(d).join(m[cur_variables]).dropna()
-    data = d.join(m[cur_variables]).dropna()
+    data = d.join(m[fit_vars]).dropna()
 
     _res = list()
-    for col in facs.columns:
-        data[col] = data[col] / 100  # for logit or binomial
+    for col in d.columns:
+        # data[col] = data[col] / 100  # for logit or binomial
 
-        formula = f"{col} ~ {' + '.join(cur_variables)}"
+        formula = f"{col} ~ {' + '.join(fit_vars)}"
         md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
-        mdf = md.fit(maxiter=100)
-        _res.append(
-            mdf.params.to_frame(name="coef").join(mdf.pvalues.rename("pval")).assign(variable=col)
-        )
+        mdf = md.fit_regularized(maxiter=100, refit=True)
+        params = pd.Series(mdf.params, index=md.exog_names, name="coef")
+        pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
+
     res[label] = res[label].append(pd.concat(_res).rename_axis(index="comparison").loc[continuous])
 
     res[label].to_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
@@ -167,19 +224,21 @@ for m, d, label in [(meta, facs, "original"), (meta_reduced, facs_reduced, "redu
 
 for label in ["original", "reduced"]:
 
+    res[label] = pd.read_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
+
     long_f = res[label].pivot_table(index="variable", columns="comparison")
     long_f.index = matrix.columns
 
     changes = long_f["coef"]
     pvals = long_f["pval"]
-    logpvals = -np.log10(pvals)
+    logpvals = log_pvalues(pvals).fillna(0)
     qvals = (
         long_f["pval"]
         .apply(multipletests, method="fdr_bh")
         .apply(lambda x: pd.Series(x[1]))
         .T.set_index(long_f.index)
     )
-    logqvals = -np.log10(qvals)
+    logqvals = log_pvalues(qvals)
 
     # Visualize
 
@@ -193,7 +252,7 @@ for label in ["original", "reduced"]:
     # # # Heatmap combinin both change and significance
     cols = ~changes.columns.str.contains("|".join(technical))
     grid = sns.clustermap(
-        changes.loc[:, cols],
+        changes.loc[:, cols].drop("Intercept", axis=1),
         cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
         row_colors=logpvals.loc[:, cols],
         **kwargs,
@@ -203,7 +262,7 @@ for label in ["original", "reduced"]:
     # # # only significatnt
     sigs = (logqvals >= log_alpha_thresh).any(1)
     grid = sns.clustermap(
-        changes.loc[sigs, cols],
+        changes.loc[sigs, cols].drop("Intercept", axis=1),
         cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
         row_colors=logpvals.loc[sigs, cols],
         xticklabels=True,
@@ -275,8 +334,8 @@ for label in ["original", "reduced"]:
             axes[i].set_ylabel("log2(fold-change)")
 
             texts = text(
+                changes.loc[sigs, "Intercept"],
                 changes.loc[sigs, col],
-                logpvals.loc[sigs, col],
                 changes.loc[sigs, col].index,
                 axes[i],
                 fontsize=5,
