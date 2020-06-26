@@ -1,0 +1,66 @@
+{
+    "Checkpoint": {
+        "id": "WB_Checkpoint",
+        "num": "309657",
+        "channels": [
+            "Viablity(APC-R700-A)",
+            "CD3(FITC-A)",
+            "CD4(BV605-A)",
+            "CD8(APC-H7-A)",
+            "CD152(PE-A)",
+            "TIGIT(PerCP-Cy5-5-A)",
+            "CD366(PE-Cy7-A)",
+            "VISTA(APC-A)",
+            "CD279(Pacific Blue-A)",
+            "CD223(V500C-A)"
+        ]
+    },
+    "Ig": {
+        "id": "WB_IgG_IgM",
+        "num": "309658",
+        "channels": [
+            "sIgG(FITC-A)",
+            "CD25(PE-A)",
+            "CD27(PerCP-Cy5-5-A)",
+            "CD10(PE-Cy7-A)",
+            "sIgM(APC-A)",
+            "Viability(APC-R700-A)",
+            "CD20(APC-H7-A)",
+            "CD19(Pacific Blue-A)",
+            "CD45(V500C-A)",
+            "CD5(BV605-A)"
+        ]
+    },
+    "PBMC": {
+        "id": "PBMC_MDSC",
+        "num": "309659",
+        "channels": [
+            "CD15(FITC-A)",
+            "CD33(PE-A)",
+            "HLA-DR(PerCP-Cy5-5-A)",
+            "CD3(PE-Cy7-A)",
+            "CD11b(APC-A)",
+            "Viability(APC-R700-A)",
+            "CD14(APC-H7-A)",
+            "CD124(Pacific Blue-A)",
+            "CD45(V500C-A)",
+            "CD16(BV605-A)"
+        ]
+    },
+    "Memory": {
+        "id": "WB_Memory",
+        "num": "309660",
+        "channels": [
+            "Viability(APC-R700-A)",
+            "CD3(FITC-A)",
+            "CD4(BV605-A)",
+            "CD8(APC-H7-A)",
+            "CD45RA(PE-Cy7-A)",
+            "CD45RO(PerCP-Cy5-5-A)",
+            "CD25(PE-A)",
+            "CD197(APC-A)",
+            "CD95(Pacific Blue-A)",
+            "CD62L(V500C-A)"
+        ]
+    }
+}
