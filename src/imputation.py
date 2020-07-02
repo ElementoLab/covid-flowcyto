@@ -18,26 +18,11 @@ from umap import UMAP
 import imc
 from imc.graphics import to_color_series
 
+from src.conf import *
 
-figkws = dict(dpi=300, bbox_inches="tight")
 
-original_dir = Path("data") / "original"
-metadata_dir = Path("metadata")
-data_dir = Path("data")
-results_dir = Path("results")
-
-for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
-    _dir.mkdir(exist_ok=True, parents=True)
-
-metadata_file = metadata_dir / "annotation.pq"
-matrix_file = data_dir / "matrix.pq"
-matrix_imputed_file = data_dir / "matrix.pq"
-
-meta = pd.read_parquet(metadata_dir / "annotation.pq")
-matrix = pd.read_parquet(data_dir / "matrix.pq")
-
-categories = ["severity_group", "intubated", "death", "heme", "bmt", "obesity", "patient"]
-continuous = ["timepoint"]
+meta = pd.read_parquet(metadata_file)
+matrix = pd.read_parquet(matrix_file)
 
 
 # Impute missing values
@@ -62,4 +47,4 @@ matrix_imp_MF = pd.DataFrame(
 )
 
 matrix_imp_MF = matrix_imp_MF.clip(lower=0)
-matrix_imp_MF.to_parquet(data_dir / "matrix_imputed.pq")
+matrix_imp_MF.to_parquet(matrix_imputed_file)

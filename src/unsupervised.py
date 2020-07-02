@@ -20,6 +20,8 @@ import imc
 from imc.types import Path
 from imc.graphics import to_color_series
 
+from src.conf import *
+
 
 def plot_projection(x, meta, cols, n_dims=4, algo_name="PCA"):
     n = len(cols)
@@ -48,30 +50,15 @@ def zscore(x, axis=0):
     return (x - x.mean(axis)) / x.std(axis)
 
 
-figkws = dict(dpi=300, bbox_inches="tight")
-
-original_dir = Path("data") / "original"
-metadata_dir = Path("metadata")
-data_dir = Path("data")
-results_dir = Path("results")
 output_dir = results_dir / "unsupervised"
-output_dir.mkdir(exist_ok=True, parents=True)
-
-for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
-    _dir.mkdir(exist_ok=True, parents=True)
-
-metadata_file = metadata_dir / "annotation.pq"
-matrix_file = data_dir / "matrix.pq"
-matrix_imputed_file = data_dir / "matrix_imputed.pq"
 
 meta = pd.read_parquet(metadata_file)
 matrix = pd.read_parquet(matrix_imputed_file)
 
 
-categories = ["patient", "severity_group", "intubated", "death", "heme", "bmt", "obesity"]
-technical = ["date"]
-continuous = ["timepoint"]
-sample_variables = meta[categories + continuous + technical]
+categories = CATEGORIES
+continuous = CONTINUOUS
+sample_variables = meta[categories + continuous]
 
 cols = matrix.columns.str.extract("(.*)/(.*)")
 cols.index = matrix.columns
@@ -287,7 +274,7 @@ for model, kwargs in [
     (MDS, dict(n_dims=1)),
     (TSNE, dict(n_dims=1)),
     (UMAP, dict(n_dims=1)),
-]:
+][::-1]:
     name = str(model).split(".")[-1].split("'")[0]
     model_inst = model()
 
