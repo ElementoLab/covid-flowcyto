@@ -34,6 +34,11 @@ data/fcs/__done__:
 	python -u src/get_fcs.py
 
 
+metadata/facs_dates.reduced.csv:
+	$(info    Parsing batch date out of FCS files)
+	python -u src/parse_batch.py
+
+
 results/single_cell/__done__: data/fcs/__done__
 	$(info    Running single cell analysis)
 	python -u src/single_cell.py

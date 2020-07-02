@@ -96,16 +96,16 @@ meta["bmi"] = meta["bmi"].astype(float)
 
 
 meta["heme"] = meta["heme"].replace("no", "False").replace("yes", "True")
-meta["bmt"] = meta["bmt"].replace("no", "False").replace("yes", "True")
+meta["bone_marrow_transplant"] = meta["bmt"].replace("no", "False").replace("yes", "True")
 meta["pcr"] = meta["pcr"].replace("neg", "False").replace("pos", "True")
 
 # extract commorbidities
 
 # # leukemia/lymphoma
 lymp = ["CLL", "AML", "DLBCL", "MM", "ALL"]
-meta["leukemia-lymphoma"] = "False"
+meta["leukemia_lymphoma"] = "False"
 meta.loc[
-    meta["other"].str.contains("|".join(lymp), case=False).fillna(False), "leukemia-lymphoma"
+    meta["other"].str.contains("|".join(lymp), case=False).fillna(False), "leukemia_lymphoma"
 ] = "True"
 
 
@@ -120,8 +120,11 @@ meta.loc[
 ] = "False"
 
 
-# # DM - TODO: find out what it is
-meta["DM"] = meta["DM"].replace("no", "False").replace("yes", "True")
+# # Diabetes
+meta["diabetes"] = meta["DM"].replace("no", "False").replace("yes", "True")
+meta.loc[
+    pd.isnull(meta["diabetes"]) & meta["severity_group"].isin(["severe", "mild"]), "diabetes",
+] = "False"
 
 # # Hyperlypidemia
 meta["hyperlypidemia"] = "False"
@@ -156,16 +159,16 @@ categories = {
     "severity_group": ["negative", "non-covid", "mild", "severe", "convalescent"],
     "hospitalization": ["False", "True"],
     "intubation": ["False", "True"],
-    "death": ["alive", "mild", "dead"],
+    "death": ["alive", "dead"],
     "heme": ["False", "True"],
-    "bmt": ["False", "True"],
+    "bone_marrow_transplant": ["False", "True"],
     "obesity": ["nonobese", "overweight", "obese"],
     # TODO: pyarrow/parquet serialization currently does not support categorical bool
-    "leukemia-lymphoma": ["False", "True"],
+    "leukemia_lymphoma": ["False", "True"],
     "hypertension": ["False", "True"],
     "hyperlypidemia": ["False", "True"],
     "sleep_apnea": ["False", "True"],
-    "DM": ["False", "True"],
+    "diabetes": ["False", "True"],
     "tocilizumab": ["False", "True"],
     "tocilizumab_pretreatment": ["False", "True"],
     "tocilizumab_postreatment": ["False", "True"],
@@ -175,13 +178,35 @@ categories = {
 for col in categories:
     meta[col] = pd.Categorical(meta[col], categories=categories[col], ordered=True)
 
+# add batch from FCS files metadata
+batch_dates_file = metadata_dir / "facs_dates.reduced.csv"
+if batch_dates_file.exists():
+    batch = pd.read_csv(batch_dates_file)
+    batch["processing_batch"] = pd.to_datetime(batch["processing_batch"])
+    idx = meta.index
+    meta = meta.merge(batch, how="left", validate="many_to_one")
+    meta.index = idx
+
+# add two continuous variables which are the dates minmax_scaled
+meta["datesamples_continuous"] = minmax_scale(meta["datesamples"])
+meta["processing_batch_continuous"] = minmax_scale(meta["processing_batch"])
+
+
 # reorder columns
 last_cols = ["other", "flow_comment"]
 order = meta.columns[~meta.columns.isin(last_cols)].tolist() + last_cols
 meta = meta[order]
 meta.index.name = "sample_name"
 
-to_drop = ["time days from symptoms start", "HTN", "alive", "hospitalized", "intubated"]
+to_drop = [
+    "time days from symptoms start",
+    "bmt",
+    "DM",
+    "HTN",
+    "alive",
+    "hospitalized",
+    "intubated",
+]
 
 meta = meta.drop(to_drop, axis=1)
 meta.to_csv(metadata_dir / "annotation.csv")

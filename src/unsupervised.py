@@ -7,20 +7,28 @@ import json
 import re
 
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.impute import KNNImputer
-from fancyimpute import MatrixFactorization
+from sklearn.preprocessing import LabelEncoder
 from sklearn.decomposition import PCA, NMF
 from sklearn.manifold import MDS, TSNE
 from umap import UMAP
 
-import imc
-from imc.types import Path
+import imc  # this import is here to allow automatic colorbars in clustermap
 from imc.graphics import to_color_series
 
 from src.conf import *
+
+
+def fix_clustermap_fonts(grid, fontsize=3):
+    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), fontsize=fontsize, ha="left")
+    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), fontsize=fontsize, va="top")
+    grid.ax_row_colors.set_yticklabels(
+        grid.ax_row_colors.get_yticklabels(), fontsize=fontsize, ha="left"
+    )
+    grid.ax_row_colors.set_xticklabels(
+        grid.ax_row_colors.get_xticklabels(), fontsize=fontsize, va="top"
+    )
 
 
 def plot_projection(x, meta, cols, n_dims=4, algo_name="PCA"):
@@ -44,10 +52,6 @@ def plot_projection(x, meta, cols, n_dims=4, algo_name="PCA"):
     for i, ax in enumerate(axes[-1, :]):
         ax.set_xlabel(algo_name + str(i + 1))
     return fig
-
-
-def zscore(x, axis=0):
-    return (x - x.mean(axis)) / x.std(axis)
 
 
 output_dir = results_dir / "unsupervised"
@@ -80,10 +84,13 @@ variable_classes = (
 
 # # Plot abundance of major populations for each patient group
 # + a few ratios like CD4/CD8 (of CD3+)
-for cat_var in categories[:4]:
+for cat_var in categories:
     # cat_var = "severity_group"
 
     for panel in variable_classes["panel"].unique():
+        figfile = output_dir / f"variable_illustration.{cat_var}.panel_{panel}.swarm+boxen.svg"
+        if figfile.exists():
+            continue
 
         data = (
             matrix.loc[:, variable_classes.query(f"panel == '{panel}'").index]
@@ -124,56 +131,85 @@ for cat_var in categories[:4]:
                 ax.set_title(var)
 
         # grid.map(sns.boxplot)
-        grid.savefig(output_dir / f"variable_illustration.{cat_var}.panel_{panel}.swarm+boxen.svg")
+        grid.savefig(figfile)
         plt.close(grid.fig)
 
 
 # # Simply correlate with clinical continuous
+for num_var in continuous:
+    for panel in variable_classes["panel"].unique():
+        figfile = output_dir / f"variable_illustration.{num_var}.panel_{panel}.swarm+boxen.svg"
+        if figfile.exists():
+            continue
 
+        data = (
+            matrix.loc[:, variable_classes.query(f"panel == '{panel}'").index]
+            .join(meta[[num_var]])
+            .melt(id_vars=[num_var], var_name="population", value_name="abundance (%)")
+        )
 
-prefix = "covid-facs.cell_type_abundances."
+        kws = dict(data=data, x=num_var, y="abundance (%)")
+        grid = sns.FacetGrid(data=data, col="population", sharey=False, height=3, col_wrap=4)
+        grid.map_dataframe(sns.regplot, **kws)
+
+        # add stats to title
+        for ax in grid.axes.flat:
+            var = ax.get_title().replace("population = ", "")
+            try:
+                child, parent = re.findall(r"(.*)/(.*)", var)[0]
+                ax.set_title(child)
+                ax.set_ylabel(f"% {parent}")
+            except IndexError:
+                ax.set_title(var)
+            ax.set_xlabel(num_var)
+
+        # grid.map(sns.boxplot)
+        grid.savefig(figfile)
+        plt.close(grid.fig)
+
 # Clustermaps
+prefix = "covid-facs.cell_type_abundances."
+
 
 # # all samples, all variables
-grid = sns.clustermap(
-    matrix,
+kwargs = dict(
     metric="correlation",
     robust=True,
     figsize=(12, 8),
+    row_colors=sample_variables,
+    col_colors=variable_classes,
+    colors_ratio=(0.15 / sample_variables.shape[1], 0.15 / variable_classes.shape[1]),
+    dendrogram_ratio=0.1,
+    rasterized=True,
+    xticklabels=True,
+    yticklabels=True,
+)
+# # # original values
+grid = sns.clustermap(
+    matrix,
     cbar_kws=dict(
         label="Cell type abundance (%)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
     ),
-    row_colors=sample_variables,
-    col_colors=variable_classes,
-    rasterized=True,
-    xticklabels=True,
-    yticklabels=True,
+    **kwargs,
 )
-grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), fontsize=3)
-grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), fontsize=4)
-grid.savefig(output_dir / prefix + "clustermap.percentage.svg", **figkws)
+fix_clustermap_fonts(grid)
+grid.savefig(output_dir / (prefix + "clustermap.percentage.svg"), **figkws)
+plt.close(grid.fig)
 
+# # # zscore
 grid = sns.clustermap(
     matrix,
     z_score=1,
-    metric="correlation",
     cmap="RdBu_r",
     center=0,
-    robust=True,
-    figsize=(12, 8),
     cbar_kws=dict(
         label="Cell type abundance\n(Z-score)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
     ),
-    row_colors=sample_variables,
-    col_colors=variable_classes,
-    rasterized=True,
-    xticklabels=True,
-    yticklabels=True,
+    **kwargs,
 )
-grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), fontsize=3)
-grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), fontsize=4)
-grid.savefig(output_dir / prefix + "clustermap.zscore.svg", **figkws)
-
+fix_clustermap_fonts(grid)
+grid.savefig(output_dir / (prefix + "clustermap.zscore.svg"), **figkws)
+plt.close(grid.fig)
 
 # # sample correlation
 # # variable correlation
@@ -182,22 +218,25 @@ for df, label, colors in [
     (matrix, "variable", variable_classes),
     (matrix.T, "sample", sample_variables),
 ]:
+    kws = kwargs.copy()
+    kws.update(
+        dict(
+            figsize=(8, 8),
+            center=0,
+            row_colors=colors,
+            col_colors=colors,
+            colors_ratio=(0.15 / colors.shape[1], 0.15 / colors.shape[1]),
+        )
+    )
     grid = sns.clustermap(
         df.corr(),
-        metric="correlation",
-        cmap="RdBu_r",
         cbar_kws=dict(
             label=f"{label} correlation",  # , orientation="horizontal", aspect=0.2, shrink=0.2
         ),
-        row_colors=colors,
-        col_colors=colors,
-        rasterized=True,
-        xticklabels=True,
-        yticklabels=True,
+        **kws,
     )
-    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), fontsize=3)
-    grid.ax_heatmap.set_xticklabels(grid.ax_heatmap.get_xticklabels(), fontsize=4)
-    grid.savefig(output_dir / prefix + f"{label}_correlation.clustermap.svg", **figkws)
+    fix_clustermap_fonts(grid)
+    grid.savefig(output_dir / (prefix + f"{label}_correlation.clustermap.svg"), **figkws)
     plt.close(grid.fig)
 
 
@@ -209,24 +248,21 @@ for panel in variable_classes["panel"].unique():
     q = variable_classes["panel"] == panel
     if matrix.loc[:, q].shape[1] < 2:
         continue
+
+    # kws = kwargs.copy()
+    # kws.update(dict(figsize=np.asarray(matrix.loc[:, q].shape) * 0.05))
     grid = sns.clustermap(
         matrix.loc[:, q],
         z_score=1,
-        center=0,
-        robust=True,
-        metric="correlation",
         cmap="RdBu_r",
+        center=0,
         cbar_kws=dict(
             label="Cell type abundance\n(Z-score)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
         ),
-        row_colors=sample_variables,
-        col_colors=variable_classes.loc[q],
-        rasterized=True,
-        xticklabels=True,
-        yticklabels=True,
+        **kwargs,
     )
-    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), fontsize=3)
-    grid.savefig(output_dir / prefix + f"only_{panel}.clustermap.svg", **figkws)
+    fix_clustermap_fonts(grid)
+    grid.savefig(output_dir / (prefix + f"only_{panel}.clustermap.svg"), **figkws)
     plt.close(grid.fig)
 
 
@@ -234,24 +270,20 @@ for population in parent_population.unique():
     q = parent_population == population
     if sum(q) < 2:
         continue
+    # kws = kwargs.copy()
+    # kws.update(dict(figsize=np.asarray(matrix.loc[:, q].shape) * 0.05))
     grid = sns.clustermap(
         matrix.loc[:, q],
         z_score=1,
-        center=0,
-        robust=True,
-        metric="correlation",
         cmap="RdBu_r",
+        center=0,
         cbar_kws=dict(
             label="Cell type abundance\n(Z-score)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
         ),
-        row_colors=sample_variables,
-        col_colors=variable_classes.loc[q],
-        rasterized=True,
-        xticklabels=True,
-        yticklabels=True,
+        **kwargs,
     )
-    grid.ax_heatmap.set_yticklabels(grid.ax_heatmap.get_yticklabels(), fontsize=3)
-    grid.savefig(output_dir / prefix + f"only_{population}.clustermap.svg", **figkws)
+    fix_clustermap_fonts(grid)
+    grid.savefig(output_dir / (prefix + f"only_{population}.clustermap.svg"), **figkws)
     plt.close(grid.fig)
 
 
