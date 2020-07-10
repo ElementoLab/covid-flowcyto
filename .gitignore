@@ -15,8 +15,10 @@ dist/
 
 
 # toy/experimental files
+*.xls
+*.xlsx
 *.txt
-# *.csv
+*.csv
 *.tsv
 *.pkl
 *.pickle
@@ -24,6 +26,7 @@ dist/
 *.png
 *.jpg
 *.jpeg
+*.pdf
 
 # ignore mypy
 .mypy*
