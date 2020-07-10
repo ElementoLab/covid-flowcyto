@@ -1,7 +1,27 @@
 #!/usr/bin/env python
 
 """
-This script does unsupervised analysis of the gated flow cytometry data.
+This script does supervised analysis of the gated flow cytometry data.
+
+The main analysis is the fitting of linear models on these data.
+
+A few issues and a few options for each:
+ - design:
+     - controls were sampled one or more times while cases only once:
+         - reduce controls by mean? -> can't model batch
+         - add patient as mixed effect? -> don't have more than one sample for cases
+ - missing data:
+     - continuous:
+         - imputation: only ~0.1% missing so, no brainer
+     - categoricals:
+         - drop
+         - imputation?: circular argumentation - no go
+ - proportion nature of the data:
+     - z-score (loose sensitivity, ~harder to interpret coefficients)
+     - logistic reg (did not converge for many cases :()
+     - use Binomial GLM (no power?)
+     - use Gamma GLM + log link (ok, but large coefficients sometimes :/)
+     - use Gamma GLM + log link + regularization -> seems like the way to go
 """
 
 import re
@@ -15,6 +35,7 @@ import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 from adjustText import adjust_text
+import parmap
 
 import imc  # this import is here to allow automatic colorbars in clustermap
 from imc.graphics import to_color_series
@@ -61,6 +82,18 @@ def rename_back(x: Union[Series, str]) -> Union[Series, str]:
     return y[0] if isinstance(x, str) else y
 
 
+def fit_model(variable, covariates, data):
+    formula = f"{variable} ~ {' + '.join(covariates)}"
+    fam = sm.families.Gamma(sm.families.links.log())
+    md = smf.glm(formula, data, family=fam)
+    mdf = md.fit_regularized(maxiter=100, refit=True)  # , L1_wt=1 # <- Ridge
+    params = pd.Series(mdf.params, index=md.exog_names, name="coef")
+    pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
+
+    res = params.to_frame().join(pvalues).assign(variable=rename_back(variable))
+    return res
+
+
 def log_pvalues(x, f=0.1):
     with np.errstate(divide="ignore", invalid="ignore"):
         ll = -np.log10(x)
@@ -87,50 +120,13 @@ cols.index = matrix.columns
 parent_population = cols[1].rename("parent_population")
 
 
-# Fit linear models
-#
-#    Here we have a few issues and a few options for each:
-#     - design:
-#         - controls were sampled one or more times while cases only once:
-#             - reduce controls by mean? -> can't model batch
-#             - add patient as mixed effect? -> don't have more than one sample for cases
-#     - missing data:
-#         - continuous:
-#             - imputation: only ~0.1% missing so, no brainer
-#         - categoricals:
-#             - drop
-#             - imputation?: circular argumentation - no go
-#     - proportion nature of the data:
-#         - z-score (loose sensitivity, ~harder to interpret coefficients)
-#         - logistic reg (did not converge for many cases :()
-#         - use Binomial GLM (no power?)
-#         - use Gamma GLM + log link (ok, but large coefficients sometimes :/)
-#         - use Gamma GLM + log link + regularization -> seems like the way to go
-
-
-models = dict()
-
-# Model 1: compare normals vs patients - major categorical factors + sex + age
-categories = ["sex", "patient", "COVID19"]
-continuous = ["age"]
-technical = ["processing_batch_categorical"]
-variables = categories + continuous + technical
-model_name = "1-general"
-models[model_name] = variables
-
-
+# Decide if it makes sense to use full matrix of with less variable redundancy
+MATRIX_TO_USE = matrix_reduced
 # in order to use the variable names in linear model, names must be cleaned up
-matrix_c = matrix_reduced.copy()
+matrix_c = MATRIX_TO_USE.copy()
 matrix_c.columns = rename_forward(matrix_c.columns)
 
-
-# Model 2: look deep into patients - major categorical factors + age + time
-categories = CATEGORIES_T1
-technical = ["processing_batch_categorical"]
-continuous = ["age", "time_symptoms"]
-variables = categories + continuous + technical
-
-
+# Decide if using all samples (including technical replicates or reduced version)
 # This is a reduced version, where replicates are averaged
 meta_reduced = meta.drop_duplicates(subset=["sample_id"]).sort_values(
     "sample_id"
@@ -140,87 +136,103 @@ matrix_c_reduced = (
 )
 
 
-res = dict()
+# Define models
+models = dict()
+
+# Model 1: compare normals vs patients - major categorical factors + sex + age
+categories = ["sex", "patient", "COVID19"]
+continuous = ["age"]
+technical = [
+    "processing_batch_continuous"
+]  # "processing_batch_continuous", "processing_batch_categorical"
+variables = categories + continuous + technical
+model_name = "1-general"
+models[model_name] = variables
+
+
+# Model 2: look deep into patients
+categories = [
+    "sex",
+    "COVID19",
+    "severity_group",
+    "hospitalization",
+    "intubation",
+    "death",
+    # "diabetes",
+    # "obesity",
+    # "hypertension",
+    # "date"
+]
+continuous = ["age", "time_symptoms"]  # "bmi", "time_symptoms"]
+technical = ["processing_batch_continuous"]
+variables = categories + continuous + technical
+model_name = "2-covid"
+models[model_name] = variables
+
+
+# Model 3: look at changes in treatment
+categories = [
+    "sex",
+    "severe",  # <- take only severe patients
+    # "hospitalization",
+    # "intubation",
+    # "death",
+    # "diabetes",
+    # "obesity", <- no overweight patients that are severe,
+    # "hypertension",
+    "tocilizumab",
+]
+continuous = [
+    "age",
+    # "bmi",
+    "time_symptoms",
+]
+technical = ["processing_batch_continuous"]
+variables = categories + continuous + technical
+model_name = "3-treatment"
+models[model_name] = variables
+
+
+results = dict()
 
 # Fit
-for m, d, label, fit_vars in [
-    (meta, matrix_c, "original", variables),
-    (meta_reduced, matrix_c_reduced, "reduced", variables[:-1]),
-]:
-    # data = zscore(d).join(m[fit_vars]).dropna()
-    data = d.join(m[fit_vars]).dropna()
 
-    unique_vars = data.columns[data.nunique() == 1]
-    print(
-        f"Variables '{', '.join(unique_vars)}' have only one value. Removing from model."
-    )
-    data = data.drop(unique_vars, axis=1)
-    fit_vars = [v for v in fit_vars if v not in unique_vars]
+## m, d, label, fit_vars = (meta_reduced, matrix_c_reduced, "reduced", variables)
 
-    # data.sort_values(fit_vars).to_csv(
-    #     output_dir / f"model_X_matrix.{model_name}.csv"
-    # )
+for model_name, variables in models.items():
+    for m, d, label, fit_vars in [
+        (meta, matrix_c, "original", variables),
+        (meta_reduced, matrix_c_reduced, "reduced", variables),
+    ]:
+        # data = zscore(d).join(m[fit_vars]).dropna()
+        data = d.join(m[fit_vars]).dropna()
 
-    _res = list()
-    for col in tqdm(d.columns):
-        # data[col] = data[col] / 100  # for logit or binomial
+        u = data.nunique() == 1
+        if u.any():
+            print(
+                f"Variables '{', '.join(data.columns[u])}' have only one value."
+            )
+            print("Removing from model.")
+            fit_vars = [v for v in fit_vars if v not in data.columns[u]]
+            data = data.drop(data.columns[u], axis=1)
 
-        formula = f"{col} ~ {' + '.join(fit_vars)}"
-        # formula = f"{col} ~ severity_group"
-        # md = smf.glm(formula, data)
-        md = smf.glm(
-            formula, data, family=sm.families.Gamma(sm.families.links.log())
-        )
-        # md = smf.logit(formula, data)
-        # md = smf.glm(formula, data, family=sm.families.Binomial())
-
-        # mdf = md.fit(maxiter=100)
-        mdf = md.fit_regularized(
-            maxiter=100, refit=True
-        )  # , L1_wt=1 # <- Ridge
-        params = pd.Series(mdf.params, index=md.exog_names, name="coef")
-        pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
-
-        # fig, ax = plt.subplots()
-        # sns.boxplot(data=data, x="severity_group", y=col, ax=ax)
-        # sns.swarmplot(data=data, x="severity_group", y=col, ax=ax)
-        # ax.set_title(str(params[params.index.str.contains("severity_group")]))
-
-        _res.append(
-            params.to_frame().join(pvalues).assign(variable=rename_back(col))
+        # Keep record of exactly what was the input to the model:
+        data.sort_values(fit_vars).to_csv(
+            output_dir / f"model_X_matrix.{model_name}.{label}.csv"
         )
 
-    res[label] = pd.concat(_res).rename_axis(index="comparison")
-
-    res[label].to_csv(
-        output_dir / f"differential.{model_name}.{label}.results.csv"
-    )
-
-
-# # # Now try a model of patients only where we regress on time too
-# model_name = "categoricals+continuous"
-# cur_variables = categories[:4] + technical + continuous
-
-# for m, d, label, fit_vars in [
-#     (meta, matrix_c, "original", cur_variables),
-#     (meta_reduced, matrix_c_reduced, "reduced", cur_variables[:-1]),
-# ]:
-#     # data = zscore(d).join(m[cur_variables]).dropna()
-#     data = d.join(m[fit_vars]).dropna()
-
-#     _res = list()
-#     for col in d.columns:
-#         # data[col] = data[col] / 100  # for logit or binomial
-
-#         formula = f"{col} ~ {' + '.join(fit_vars)}"
-#         md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
-#         mdf = md.fit_regularized(maxiter=100, refit=True)
-#         params = pd.Series(mdf.params, index=md.exog_names, name="coef")
-#         pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
-
-#     res[label] = res[label].append(pd.concat(_res).rename_axis(index="comparison").loc[continuous])
-
-#     res[label].to_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
+        # Fit in parallel
+        _res = parmap.map(
+            fit_model, d.columns, covariates=fit_vars, data=data, pm_bar=True
+        )
+        res = pd.concat(_res).rename_axis(index="comparison")
+        res["qval"] = multipletests(res["pval"].fillna(1), method="fdr_bh")[1]
+        res["log_pval"] = log_pvalues(res["pval"]).fillna(0)
+        res["log_qval"] = log_pvalues(res["qval"]).fillna(0)
+        res.to_csv(
+            output_dir / f"differential.{model_name}.{label}.results.csv"
+        )
+        results[(model_name, label)] = res
 
 
 for label in ["original", "reduced"]:

@@ -10,8 +10,6 @@ from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import imc
-
 from src.conf import *
 
 
@@ -66,7 +64,6 @@ meta["sex"] = (
     .str.replace("m", "Male", case=False)
     .str.replace("f", "Female", case=False)
 )
-
 
 # reverse the name of death/live
 meta["death"] = meta["alive"]
@@ -172,6 +169,11 @@ for col in meta.loc[:, meta.dtypes == "object"]:
         continue
     meta[col] = meta[col].str.strip()
 
+
+# add one column coding severity in order to quickly select samples in linear models
+meta = meta.join(pd.get_dummies(meta["severity_group"]).replace(0, np.nan))
+
+
 # Normal donors vs patients
 meta["patient"] = (
     (meta["severity_group"] != "negative")
@@ -230,6 +232,9 @@ if batch_dates_file.exists():
     )
     idx = meta.index
     meta = meta.merge(batch, how="left", validate="many_to_one")
+    # TODO: FIX this when the 3 missing FCS files are available
+    meta["processing_batch"].fillna(pd.to_datetime("2020-07-06"))
+    # TODO: FIX this when the 3 missing FCS files are available
     meta.index = idx
 
 # add two continuous variables which are the dates minmax_scaled
