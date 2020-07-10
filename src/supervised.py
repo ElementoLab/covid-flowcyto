@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 """
+This script does unsupervised analysis of the gated flow cytometry data.
 """
 
-from pathlib import Path
 import re
 
 import numpy as np
@@ -16,12 +16,10 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 from adjustText import adjust_text
 
-import imc
+import imc  # this import is here to allow automatic colorbars in clustermap
 from imc.graphics import to_color_series
 
-
-def zscore(x, axis=0):
-    return (x - x.mean(axis)) / x.std(axis)
+from src.conf import *
 
 
 def text(x, y, s, ax=None, **kws):
@@ -40,102 +38,53 @@ def add_colorbar(im, ax=None):
     ax.figure.colorbar(im, cax=cax, orientation="vertical")
 
 
-def rename_back(x: str) -> str:
+def rename_forward(x: Series) -> Series:
     return (
-        pd.Series(x)
-        .str.replace("___", "/")
+        x.str.replace("/", "___")
+        .str.replace("+", "pos")
+        .str.replace("-", "neg")
+        .str.replace("(", "_O_")
+        .str.replace(")", "_C_")
+    )
+
+
+def rename_back(x: Union[Series, str]) -> Union[Series, str]:
+    if isinstance(x, str):
+        _x = pd.Series(x)
+    y = (
+        _x.str.replace("___", "/")
         .str.replace("pos", "+")
         .str.replace("neg", "-")
         .str.replace("_O_", "(")
         .str.replace("_C_", ")")
-    )[0]
+    )
+    return y[0] if isinstance(x, str) else y
 
 
 def log_pvalues(x, f=0.1):
-    """
-    Calculate -log10(p-value) of array.
-
-    Replaces infinite values with:
-
-    .. highlight:: python
-    .. code-block:: python
-
-        max(x) + max(x) * f
-
-    that is, fraction ``f`` more than the maximum non-infinite -log10(p-value).
-
-    Parameters
-    ----------
-    x : :class:`pandas.Series`
-        Series with numeric values
-    f : :obj:`float`
-        Fraction to augment the maximum value by if ``x`` contains infinite values.
-
-        Defaults to 0.1.
-
-    Returns
-    -------
-    :class:`pandas.Series`
-        Transformed values.
-    """
     with np.errstate(divide="ignore", invalid="ignore"):
         ll = -np.log10(x)
         rmax = ll[ll != np.inf].max()
         return ll.replace(np.inf, rmax + rmax * f)
 
 
-# plt.text = np.vectorize(plt.text)
-# matplotlib.axes._subplots.Axes.text = np.vectorize(matplotlib.axes._subplots.Axes.text)
-
-
-figkws = dict(dpi=300, bbox_inches="tight")
-
-original_dir = Path("data") / "original"
-metadata_dir = Path("metadata")
-data_dir = Path("data")
-results_dir = Path("results")
 output_dir = results_dir / "supervised"
 output_dir.mkdir(exist_ok=True, parents=True)
 
-for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
-    _dir.mkdir(exist_ok=True, parents=True)
+meta = pd.read_parquet(metadata_file)
+matrix = pd.read_parquet(matrix_imputed_file).sort_index(0).sort_index(1)
+matrix_reduced = (
+    pd.read_parquet(matrix_imputed_reduced_file).sort_index(0).sort_index(1)
+)
 
-metadata_file = metadata_dir / "annotation.pq"
-matrix_file = data_dir / "matrix.pq"
-matrix_imputed_file = data_dir / "matrix.pq"
-
-
-categories = ["patient", "severity_group", "intubated", "death"]  # , "heme", "bmt", "obesity"]
-technical = ["date"]
-continuous = ["timepoint"]
-variables = categories + continuous + technical
-
-
-alpha_thresh = 0.01
+alpha_thresh = 0.05
 log_alpha_thresh = -np.log10(alpha_thresh)
 
 
-meta = pd.read_parquet(metadata_file)
-matrix = pd.read_parquet(matrix_imputed_file).sort_index(0).sort_index(1)
-
-
+# to annotate variables
 cols = matrix.columns.str.extract("(.*)/(.*)")
 cols.index = matrix.columns
 parent_population = cols[1].rename("parent_population")
-
-
-facs = matrix.copy()
-facs.columns = (
-    facs.columns.str.replace("/", "___")
-    .str.replace("+", "pos")
-    .str.replace("-", "neg")
-    .str.replace("(", "_O_")
-    .str.replace(")", "_C_")
-)
-
-# This is a reduced version, where replicates are averaged
-meta_reduced = meta.drop_duplicates(subset=["sample_id"]).sort_values("sample_id")
-facs_reduced = facs.groupby(meta["sample_id"]).mean().set_index(meta_reduced.index)
 
 
 # Fit linear models
@@ -146,27 +95,71 @@ facs_reduced = facs.groupby(meta["sample_id"]).mean().set_index(meta_reduced.ind
 #             - reduce controls by mean? -> can't model batch
 #             - add patient as mixed effect? -> don't have more than one sample for cases
 #     - missing data:
-#         - imputation of continuous values only ~0.1% missing so, no brainer
-#         - imputation of categoricals?
+#         - continuous:
+#             - imputation: only ~0.1% missing so, no brainer
+#         - categoricals:
+#             - drop
+#             - imputation?: circular argumentation - no go
 #     - proportion nature of the data:
-#         - z-score (loose sensitivity, harder to interpret coefficients)
+#         - z-score (loose sensitivity, ~harder to interpret coefficients)
 #         - logistic reg (did not converge for many cases :()
-#         - use Gamma GLM + log link (ok, but large coefficients sometimes :/)
 #         - use Binomial GLM (no power?)
-#
+#         - use Gamma GLM + log link (ok, but large coefficients sometimes :/)
+#         - use Gamma GLM + log link + regularization -> seems like the way to go
+
+
+models = dict()
+
+# Model 1: compare normals vs patients - major categorical factors + sex + age
+categories = ["sex", "patient", "COVID19"]
+continuous = ["age"]
+technical = ["processing_batch_categorical"]
+variables = categories + continuous + technical
+model_name = "1-general"
+models[model_name] = variables
+
+
+# in order to use the variable names in linear model, names must be cleaned up
+matrix_c = matrix_reduced.copy()
+matrix_c.columns = rename_forward(matrix_c.columns)
+
+
+# Model 2: look deep into patients - major categorical factors + age + time
+categories = CATEGORIES_T1
+technical = ["processing_batch_categorical"]
+continuous = ["age", "time_symptoms"]
+variables = categories + continuous + technical
+
+
+# This is a reduced version, where replicates are averaged
+meta_reduced = meta.drop_duplicates(subset=["sample_id"]).sort_values(
+    "sample_id"
+)
+matrix_c_reduced = (
+    matrix_c.groupby(meta["sample_id"]).mean().set_index(meta_reduced.index)
+)
+
 
 res = dict()
 
-# # First try a model with only categories available for most data
-model_name = "categoricals"
-cur_variables = categories + technical
-
+# Fit
 for m, d, label, fit_vars in [
-    (meta, facs, "original", cur_variables),
-    (meta_reduced, facs_reduced, "reduced", cur_variables[:-1]),
+    (meta, matrix_c, "original", variables),
+    (meta_reduced, matrix_c_reduced, "reduced", variables[:-1]),
 ]:
     # data = zscore(d).join(m[fit_vars]).dropna()
     data = d.join(m[fit_vars]).dropna()
+
+    unique_vars = data.columns[data.nunique() == 1]
+    print(
+        f"Variables '{', '.join(unique_vars)}' have only one value. Removing from model."
+    )
+    data = data.drop(unique_vars, axis=1)
+    fit_vars = [v for v in fit_vars if v not in unique_vars]
+
+    # data.sort_values(fit_vars).to_csv(
+    #     output_dir / f"model_X_matrix.{model_name}.csv"
+    # )
 
     _res = list()
     for col in tqdm(d.columns):
@@ -175,12 +168,16 @@ for m, d, label, fit_vars in [
         formula = f"{col} ~ {' + '.join(fit_vars)}"
         # formula = f"{col} ~ severity_group"
         # md = smf.glm(formula, data)
-        md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
+        md = smf.glm(
+            formula, data, family=sm.families.Gamma(sm.families.links.log())
+        )
         # md = smf.logit(formula, data)
         # md = smf.glm(formula, data, family=sm.families.Binomial())
 
         # mdf = md.fit(maxiter=100)
-        mdf = md.fit_regularized(maxiter=100, refit=True)  # , L1_wt=1 # <- Ridge
+        mdf = md.fit_regularized(
+            maxiter=100, refit=True
+        )  # , L1_wt=1 # <- Ridge
         params = pd.Series(mdf.params, index=md.exog_names, name="coef")
         pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
 
@@ -189,42 +186,48 @@ for m, d, label, fit_vars in [
         # sns.swarmplot(data=data, x="severity_group", y=col, ax=ax)
         # ax.set_title(str(params[params.index.str.contains("severity_group")]))
 
-        _res.append(params.to_frame().join(pvalues).assign(variable=rename_back(col)))
+        _res.append(
+            params.to_frame().join(pvalues).assign(variable=rename_back(col))
+        )
 
     res[label] = pd.concat(_res).rename_axis(index="comparison")
 
-    res[label].to_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
+    res[label].to_csv(
+        output_dir / f"differential.{model_name}.{label}.results.csv"
+    )
 
 
-# # Now try a model of patients only where we regress on time too
-model_name = "categoricals+continuous"
-cur_variables = categories[:4] + technical + continuous
+# # # Now try a model of patients only where we regress on time too
+# model_name = "categoricals+continuous"
+# cur_variables = categories[:4] + technical + continuous
 
-for m, d, label, fit_vars in [
-    (meta, facs, "original", cur_variables),
-    (meta_reduced, facs_reduced, "reduced", cur_variables[:-1]),
-]:
-    # data = zscore(d).join(m[cur_variables]).dropna()
-    data = d.join(m[fit_vars]).dropna()
+# for m, d, label, fit_vars in [
+#     (meta, matrix_c, "original", cur_variables),
+#     (meta_reduced, matrix_c_reduced, "reduced", cur_variables[:-1]),
+# ]:
+#     # data = zscore(d).join(m[cur_variables]).dropna()
+#     data = d.join(m[fit_vars]).dropna()
 
-    _res = list()
-    for col in d.columns:
-        # data[col] = data[col] / 100  # for logit or binomial
+#     _res = list()
+#     for col in d.columns:
+#         # data[col] = data[col] / 100  # for logit or binomial
 
-        formula = f"{col} ~ {' + '.join(fit_vars)}"
-        md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
-        mdf = md.fit_regularized(maxiter=100, refit=True)
-        params = pd.Series(mdf.params, index=md.exog_names, name="coef")
-        pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
+#         formula = f"{col} ~ {' + '.join(fit_vars)}"
+#         md = smf.glm(formula, data, family=sm.families.Gamma(sm.families.links.log()))
+#         mdf = md.fit_regularized(maxiter=100, refit=True)
+#         params = pd.Series(mdf.params, index=md.exog_names, name="coef")
+#         pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
 
-    res[label] = res[label].append(pd.concat(_res).rename_axis(index="comparison").loc[continuous])
+#     res[label] = res[label].append(pd.concat(_res).rename_axis(index="comparison").loc[continuous])
 
-    res[label].to_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
+#     res[label].to_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
 
 
 for label in ["original", "reduced"]:
 
-    res[label] = pd.read_csv(output_dir / f"differential.{model_name}.{label}.results.csv")
+    res[label] = pd.read_csv(
+        output_dir / f"differential.{model_name}.{label}.results.csv"
+    )
 
     long_f = res[label].pivot_table(index="variable", columns="comparison")
     long_f.index = matrix.columns
@@ -244,10 +247,18 @@ for label in ["original", "reduced"]:
 
     # # Heatmaps
     kwargs = dict(center=0, cmap="RdBu_r", robust=True, metric="correlation")
-    grid = sns.clustermap(changes, cbar_kws=dict(label="log2(fold-change)"), **kwargs)
-    grid.savefig(output_dir / f"differential.{label}.lfc.all_vars.clustermap.svg")
-    grid = sns.clustermap(logpvals, cbar_kws=dict(label="-log10(p-value)"), **kwargs)
-    grid.savefig(output_dir / f"differential.{label}.pvals_only.all_vars.clustermap.svg")
+    grid = sns.clustermap(
+        changes, cbar_kws=dict(label="log2(fold-change)"), **kwargs
+    )
+    grid.savefig(
+        output_dir / f"differential.{label}.lfc.all_vars.clustermap.svg"
+    )
+    grid = sns.clustermap(
+        logpvals, cbar_kws=dict(label="-log10(p-value)"), **kwargs
+    )
+    grid.savefig(
+        output_dir / f"differential.{label}.pvals_only.all_vars.clustermap.svg"
+    )
 
     # # # Heatmap combinin both change and significance
     cols = ~changes.columns.str.contains("|".join(technical))
@@ -257,7 +268,10 @@ for label in ["original", "reduced"]:
         row_colors=logpvals.loc[:, cols],
         **kwargs,
     )
-    grid.savefig(output_dir / f"differential.{label}.join_lfc_pvals.all_vars.clustermap.svg")
+    grid.savefig(
+        output_dir
+        / f"differential.{label}.join_lfc_pvals.all_vars.clustermap.svg"
+    )
 
     # # # only significatnt
     sigs = (logqvals >= log_alpha_thresh).any(1)
@@ -270,7 +284,8 @@ for label in ["original", "reduced"]:
         **kwargs,
     )
     grid.savefig(
-        output_dir / f"differential.{label}.join_lfc_pvals.p<{alpha_thresh}_only.clustermap.svg"
+        output_dir
+        / f"differential.{label}.join_lfc_pvals.p<{alpha_thresh}_only.clustermap.svg"
     )
 
     # # Volcano plots
@@ -285,9 +300,15 @@ for label in ["original", "reduced"]:
         for i, col in enumerate(cols):
             sigs = logqvals[col] >= log_alpha_thresh
             kwargs = dict(s=2, alpha=0.5, color="grey")
-            axes[i].scatter(changes.loc[~sigs, col], logpvals.loc[~sigs, col], **kwargs)
-            kwargs = dict(s=10, alpha=1.0, c=logqvals.loc[sigs, col], cmap="Reds", vmin=0)
-            im = axes[i].scatter(changes.loc[sigs, col], logpvals.loc[sigs, col], **kwargs)
+            axes[i].scatter(
+                changes.loc[~sigs, col], logpvals.loc[~sigs, col], **kwargs
+            )
+            kwargs = dict(
+                s=10, alpha=1.0, c=logqvals.loc[sigs, col], cmap="Reds", vmin=0
+            )
+            im = axes[i].scatter(
+                changes.loc[sigs, col], logpvals.loc[sigs, col], **kwargs
+            )
             name = re.findall(r"^(.*)\[", col)[0]
             inst = re.findall(r"\[T.(.*)\]", col)[0]
             # v = -np.log10(multipletests([alpha_thresh] * changes[col].shape[0])[1][0])
@@ -305,10 +326,16 @@ for label in ["original", "reduced"]:
                 axes[i],
                 fontsize=5,
             )
-            adjust_text(texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes[i])
+            adjust_text(
+                texts,
+                arrowprops=dict(arrowstyle="->", color="black"),
+                ax=axes[i],
+            )
             add_colorbar(im, axes[i])
 
-        fig.savefig(output_dir / f"differential.{label}.test_{category}.volcano.svg")
+        fig.savefig(
+            output_dir / f"differential.{label}.test_{category}.volcano.svg"
+        )
         plt.close(fig)
 
     # # MA plots
@@ -323,9 +350,17 @@ for label in ["original", "reduced"]:
         for i, col in enumerate(cols):
             sigs = logqvals[col] >= log_alpha_thresh
             kwargs = dict(s=2, alpha=0.5, color="grey")
-            axes[i].scatter(changes.loc[~sigs, "Intercept"], changes.loc[~sigs, col], **kwargs)
-            kwargs = dict(s=10, alpha=1.0, c=logqvals.loc[sigs, col], cmap="Reds", vmin=0)
-            im = axes[i].scatter(changes.loc[sigs, "Intercept"], changes.loc[sigs, col], **kwargs)
+            axes[i].scatter(
+                changes.loc[~sigs, "Intercept"],
+                changes.loc[~sigs, col],
+                **kwargs,
+            )
+            kwargs = dict(
+                s=10, alpha=1.0, c=logqvals.loc[sigs, col], cmap="Reds", vmin=0
+            )
+            im = axes[i].scatter(
+                changes.loc[sigs, "Intercept"], changes.loc[sigs, col], **kwargs
+            )
             name = re.findall(r"^(.*)\[", col)[0]
             inst = re.findall(r"\[T.(.*)\]", col)[0]
             axes[i].axhline(0, color="grey", linestyle="--", alpha=0.5)
@@ -340,10 +375,16 @@ for label in ["original", "reduced"]:
                 axes[i],
                 fontsize=5,
             )
-            adjust_text(texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes[i])
+            adjust_text(
+                texts,
+                arrowprops=dict(arrowstyle="->", color="black"),
+                ax=axes[i],
+            )
             add_colorbar(im, axes[i])
 
-        fig.savefig(output_dir / f"differential.{label}.test_{category}.maplots.svg")
+        fig.savefig(
+            output_dir / f"differential.{label}.test_{category}.maplots.svg"
+        )
         plt.close(fig)
 
     # # Illustration of top hits
@@ -357,16 +398,24 @@ for label in ["original", "reduced"]:
             continue
         for i, col in enumerate(cols):
             v = logqvals[col].sort_values()
-            sigs = v[v >= log_alpha_thresh]
+            sigs = v  # v[v >= log_alpha_thresh]
             if sigs.empty:
                 continue
             # print(category, sigs)
             sigs = sigs.tail(n_plot).index[::-1]
-            data = matrix.loc[:, sigs].join(meta[category]).melt(id_vars=category)
+            data = (
+                matrix.loc[:, sigs].join(meta[category]).melt(id_vars=category)
+            )
 
-            kws = dict(data=data, x=category, y="value", hue=category, palette="tab10")
-            grid = sns.FacetGrid(data=data, col="variable", sharey=False, height=3, col_wrap=4)
-            grid.map_dataframe(sns.boxenplot, saturation=0.5, dodge=False, **kws)
+            kws = dict(
+                data=data, x=category, y="value", hue=category, palette="tab10"
+            )
+            grid = sns.FacetGrid(
+                data=data, col="variable", sharey=False, height=3, col_wrap=4
+            )
+            grid.map_dataframe(
+                sns.boxenplot, saturation=0.5, dodge=False, **kws
+            )
             # grid.map_dataframe(sns.stripplot, y="value", x=category, hue=category, data=data, palette='tab10')
 
             for ax in grid.axes.flat:
@@ -404,7 +453,10 @@ for label in ["original", "reduced"]:
                 )
 
             # grid.map(sns.boxplot)
-            grid.savefig(output_dir / f"differential.{label}.test_{category}.{col}.swarm.svg")
+            grid.savefig(
+                output_dir
+                / f"differential.{label}.test_{category}.{col}.swarm.svg"
+            )
             plt.close(grid.fig)
 
     # # For Mixed Effect model
@@ -422,3 +474,113 @@ for label in ["original", "reduced"]:
 
 # Add lock file
 open(output_dir / "__done__", "w")
+
+
+# Plot volcano for additional contrasts
+
+model_name = "categoricals"
+cur_variables = categories + technical
+
+m, d, label, fit_vars = (meta, matrix_c, "original", cur_variables)
+# data = zscore(d).join(m[fit_vars]).dropna()
+data = d.join(m[fit_vars]).dropna()
+
+base = "mild"
+data["severity_group"] = data["severity_group"].cat.reorder_categories(
+    ["mild", "negative", "non-covid", "severe", "convalescent"]
+)
+# base = "severe"
+# data["severity_group"] = data["severity_group"].cat.reorder_categories(["severe", "negative", "non-covid", "mild", "convalescent"])
+_res = list()
+for col in tqdm(d.columns):
+    # data[col] = data[col] / 100  # for logit or binomial
+
+    formula = f"{col} ~ {' + '.join(fit_vars)}"
+    # formula = f"{col} ~ severity_group"
+    # md = smf.glm(formula, data)
+    md = smf.glm(
+        formula, data, family=sm.families.Gamma(sm.families.links.log())
+    )
+    # md = smf.logit(formula, data)
+    # md = smf.glm(formula, data, family=sm.families.Binomial())
+
+    mdf = md.fit(maxiter=100)
+    # mdf = md.fit_regularized(maxiter=100, refit=True)  # , L1_wt=1 # <- Ridge
+    params = pd.Series(mdf.params, index=md.exog_names, name="coef")
+    pvalues = pd.Series(mdf.pvalues, index=md.exog_names, name="pval")
+
+    # fig, ax = plt.subplots()
+    # sns.boxplot(data=data, x="severity_group", y=col, ax=ax)
+    # sns.swarmplot(data=data, x="severity_group", y=col, ax=ax)
+    # ax.set_title(str(params[params.index.str.contains("severity_group")]))
+
+    _res.append(
+        params.to_frame().join(pvalues).assign(variable=rename_back(col))
+    )
+
+r = pd.concat(_res).rename_axis(index="comparison")
+
+category = "severity_group"
+
+long_f = r.loc[r.index.str.contains(category)].pivot_table(
+    index="variable", columns="comparison"
+)
+
+long_f.index = matrix.columns
+
+changes = long_f["coef"]
+pvals = long_f["pval"]
+logpvals = log_pvalues(pvals).fillna(0)
+qvals = (
+    long_f["pval"]
+    .apply(multipletests, method="fdr_bh")
+    .apply(lambda x: pd.Series(x[1]))
+    .T.set_index(long_f.index)
+)
+logqvals = log_pvalues(qvals)
+
+# Visualize
+
+# # Volcano plots
+
+cols = logpvals.columns[logpvals.columns.str.contains(category)]
+cols = cols[~cols.str.contains("covid|negative")]
+n = len(cols)
+fig, axes = plt.subplots(1, n, figsize=(n * 4, 1 * 4), squeeze=False)
+axes = axes.squeeze(0)
+for i, col in enumerate(cols):
+    sigs = logqvals[col] >= log_alpha_thresh
+    kwargs = dict(s=2, alpha=0.5, color="grey")
+    axes[i].scatter(changes.loc[~sigs, col], logpvals.loc[~sigs, col], **kwargs)
+    kwargs = dict(
+        s=10, alpha=1.0, c=logqvals.loc[sigs, col], cmap="Reds", vmin=0
+    )
+    im = axes[i].scatter(
+        changes.loc[sigs, col], logpvals.loc[sigs, col], **kwargs
+    )
+    name = re.findall(r"^(.*)\[", col)[0]
+    inst = re.findall(r"\[T.(.*)\]", col)[0]
+    # v = -np.log10(multipletests([alpha_thresh] * changes[col].shape[0])[1][0])
+    v = logpvals.loc[~sigs, col].max()
+    axes[i].axhline(v, color="grey", linestyle="--", alpha=0.5)
+    axes[i].axvline(0, color="grey", linestyle="--", alpha=0.5)
+    axes[i].set_title(f"{name}: {inst}/{data[category].min()}")
+    axes[i].set_xlabel("log2(Fold-change) " + r"($\beta$)")
+    axes[i].set_ylabel("-log10(p-value)")
+
+    texts = text(
+        changes.loc[sigs, col],
+        logpvals.loc[sigs, col],
+        changes.loc[sigs, col].index,
+        axes[i],
+        fontsize=5,
+    )
+    adjust_text(
+        texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes[i]
+    )
+    add_colorbar(im, axes[i])
+
+fig.savefig(
+    output_dir / f"differential.{label}.test_{category}.volcano.over_{base}.svg"
+)
+plt.close(fig)
