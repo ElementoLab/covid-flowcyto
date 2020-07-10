@@ -183,6 +183,7 @@ batch_dates_file = metadata_dir / "facs_dates.reduced.csv"
 if batch_dates_file.exists():
     batch = pd.read_csv(batch_dates_file)
     batch["processing_batch"] = pd.to_datetime(batch["processing_batch"])
+    batch["processing_batch_categorical"] = pd.Categorical(batch["processing_batch"], ordered=True)
     idx = meta.index
     meta = meta.merge(batch, how="left", validate="many_to_one")
     meta.index = idx

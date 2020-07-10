@@ -3,7 +3,13 @@
 """
 """
 
+from typing import Union
 from pathlib import Path as _Path
+
+import pandas as _pd
+
+Series = Union[_pd.Series]
+DataFrame = Union[_pd.DataFrame]
 
 figkws = dict(dpi=300, bbox_inches="tight")
 
@@ -18,10 +24,10 @@ for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
 metadata_file = metadata_dir / "annotation.pq"
 matrix_file = data_dir / "matrix.pq"
 matrix_imputed_file = data_dir / "matrix_imputed.pq"
-
+matrix_imputed_reduced_file = data_dir / "matrix_imputed_reduced.pq"
 
 # Sample metadata
-ORIGINAL_FILE_NAME = "clinical_data.joint.20200701.xlsx"
+ORIGINAL_FILE_NAME = "clinical_data.joint.20200710.xlsx"
 N_CATEGORICAL_COLUMNS = 25
 
 # # variables
@@ -45,6 +51,7 @@ CATEGORIES = [
     "tocilizumab_pretreatment",
     "tocilizumab_postreatment",
     "pcr",
+    "processing_batch_categorical",
 ]
 CATEGORIES_T1 = [
     "sex",
@@ -58,10 +65,14 @@ CATEGORIES_T1 = [
     "obesity",
     "hypertension",
     "tocilizumab",
-    "tocilizumab_pretreatment",
-    "tocilizumab_postreatment",
 ]
-CONTINUOUS = ["age", "time_symptoms", "datesamples_continuous", "processing_batch_continuous"]
+CONTINUOUS = [
+    "age",
+    "time_symptoms",
+    "datesamples_continuous",
+    "processing_batch_continuous",
+]
+TECHNICAL = ["processing_batch_categorical", "processing_batch_continuous"]
 VARIABLES = CATEGORIES + CONTINUOUS
 
 
