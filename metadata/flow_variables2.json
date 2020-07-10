@@ -1,0 +1,85 @@
+{
+  "WB_Memory": [
+    "CD3(FITC-A)",
+    "CD25(PE-A)",
+    "CD45RO(PerCP-Cy5-5-A)",
+    "CD45RA(PE-Cy7-A)",
+    "CD197(APC-A)",
+    "Viability(APC-R700-A)",
+    "CD8(APC-H7-A)",
+    "CD95 BV421(Pacific Blue-A)",
+    "CD62L BV510(V500C-A)",
+    "CD4(BV605-A)"
+  ],
+  "WB_NK_KIR": [
+    "CD158e(FITC-A)",
+    "CD158b(PE-A)",
+    "CD158a(PerCP-Cy5-5-A)",
+    "CD159a(PE-Cy7-A)",
+    "CD158i(APC-A)",
+    "Viability Dye(APC-R700-A)",
+    "sCD3(APC-H7-A)",
+    "CD56 BV421(Pacific Blue-A)",
+    "CD45(V500C-A)",
+    "CD16(BV605-A)"
+  ],
+  "PBMC_MDSC": [
+    "CD15(FITC-A)",
+    "CD33(PE-A)",
+    "HLA-DR(PerCP-Cy5-5-A)",
+    "CD3 + CD19 + CD56(PE-Cy7-A)",
+    "CD11b(APC-A)",
+    "Viability Dye(APC-R700-A)",
+    "CD14(APC-H7-A)",
+    "CD124 BV421(Pacific Blue-A)",
+    "CD45(V500C-A)",
+    "CD16(BV605-A)"
+  ],
+  "WB_IgG_IgM": [
+    "sIgG(FITC-A)",
+    "CD25(PE-A)",
+    "CD27(PerCP-Cy5-5-A)",
+    "CD10(PE-Cy7-A)",
+    "sIgM(APC-A)",
+    "Viability Dye(APC-R700-A)",
+    "CD20(APC-H7-A)",
+    "CD19 BV421(Pacific Blue-A)",
+    "CD45(V500C-A)",
+    "CD5(BV605-A)"
+  ],
+  "WB_Treg": [
+    "sCD3(FITC-A)",
+    "CD25(PE-A)",
+    "CD56(PerCP-Cy5-5-A)",
+    "CD4(PE-Cy7-A)",
+    "CD127(APC-A)",
+    "Viability Dye(APC-R700-A)",
+    "CD8(APC-H7-A)",
+    "CD16(Pacific Blue-A)",
+    "CD45(V500C-A)"
+  ],
+  "WB_Checkpoint": [
+    "CD3(FITC-A)",
+    "CD152(PE-A)",
+    "TIGIT(PerCP-Cy5-5-A)",
+    "CD366(PE-Cy7-A)",
+    "VISTA(APC-A)",
+    "Viablity Dye(APC-R700-A)",
+    "CD8(APC-H7-A)",
+    "CD279 BV421(Pacific Blue-A)",
+    "CD223 BV510(V500C-A)",
+    "CD4(BV605-A)"
+  ],
+  "WB_T3": [
+    "CD7(FITC-A)",
+    "CD185(PE-A)",
+    "CD278(PerCP-Cy5-5-A)",
+    "sCD3(PE-Cy7-A)",
+    "CD10(APC-A)",
+    "Viability Dye(APC-R700-A)",
+    "CD8(APC-H7-A)",
+    "CD279 BV421(Pacific Blue-A)",
+    "CD45(V500C-A)",
+    "CD4(BV605-A)"
+  ]
+}

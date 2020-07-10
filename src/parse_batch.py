@@ -1,3 +1,10 @@
+#!/usr/bin/env python
+
+"""
+This script finds the processing date of each sample from the FCS metadata.
+"""
+
+
 import json
 
 import pandas as pd
@@ -5,51 +12,67 @@ import flowkit as fk
 
 from src.conf import *
 
-panels = json.load(open(metadata_dir / "flow_variables.json"))
+panels = json.load(open(metadata_dir / "flow_variables2.json"))
 metadata_file = metadata_dir / "annotation.pq"
 meta = pd.read_parquet(metadata_file)
 
-# Extract matrix, gate
+fcs_dir = data_dir / "fcs"
 
-dates = dict()
+# Get processing date from FCS metadata
+failures = list()
+dates = {panel: pd.Series(dtype="object") for panel in panels}
 for panel in panels:
     print(panel)
 
-    _dates = dict()
     for sample_id in meta["sample_id"].unique():
+        if sample_id in dates[panel].index:
+            print(f"Skipping panel {panel}, sample {sample_id}.")
+            continue
+
         print(sample_id)
         sample_name = (
-            meta.loc[meta["sample_id"] == sample_id, ["patient_code", "sample_id"]]
+            meta.loc[
+                meta["sample_id"] == sample_id, ["patient_code", "sample_id"]
+            ]
             .drop_duplicates()
             .squeeze()
             .name
         )
 
-        fcs_dir = data_dir / "fcs" / panels[panel]["num"]
         # TODO: check for more files
         _id = int(sample_id.replace("S", ""))
         try:
-            fcs_file = list(fcs_dir.glob(f"{_id}_" + panels[panel]["id"] + "*.fcs"))[0]
+            files = sorted(list(fcs_dir.glob(f"{_id}*{panel}*.fcs")))
+            fcs_file = files[0]
+            # ^^ this will get the most recent in case the are copies (*(1) files)
         except IndexError:
             try:
-                fff = list(fcs_dir.glob(f"{_id}x" + "*.fcs"))
+                fff = list(fcs_dir.glob(f"{_id}x{panel}*.fcs"))
                 # assert len(fff) in [0, 1]
                 fcs_file = fff[0]
             except IndexError:
                 print(f"Sample {sample_id} is missing!")
+                failures.append((panel, sample_id))
                 continue
 
-        s = fk.Sample(fcs_file)
+        try:
+            s = fk.Sample(fcs_file)
+        except KeyboardInterrupt:
+            raise
+        except:
+            print(f"Sample {sample_id} failed parsing FCS file!")
+            failures.append((panel, sample_id))
+            continue
 
-        _dates[sample_id] = s.metadata["date"]
-
-    dates[panel] = pd.Series(_dates)
+        dates[panel][sample_id] = s.metadata["date"]
 
 
-dates = pd.concat({k: pd.to_datetime(v) for k, v in dates.items()}, 1)
-dates.index.name = "sample_id"
-dates.to_csv(metadata_dir / "facs_dates.csv")
+dates_df = pd.DataFrame(dates).apply(pd.to_datetime)
+dates_df.index.name = "sample_id"
+dates_df.to_csv(metadata_dir / "facs_dates.csv")
 
 # reduce panels by ~mode (most common value)
-max_dates = dates.apply(lambda x: x.value_counts().idxmax(), axis=1).rename("processing_batch")
+max_dates = dates_df.apply(lambda x: x.value_counts().idxmax(), axis=1).rename(
+    "processing_batch"
+)
 max_dates.to_csv(metadata_dir / "facs_dates.reduced.csv")

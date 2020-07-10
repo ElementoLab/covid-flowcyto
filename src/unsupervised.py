@@ -98,6 +98,8 @@ variable_classes = (
         matrix.loc[meta["patient"] == "Patient"].mean().rename("Mean patient")
     )
 )
+
+
 # Demonstrate the data
 
 
@@ -111,8 +113,8 @@ for cat_var in categories:
             output_dir
             / f"variable_illustration.{cat_var}.panel_{panel}.swarm+boxen.svg"
         )
-        # if figfile.exists():
-        #     continue
+        if figfile.exists():
+            continue
 
         data = (
             matrix.loc[:, variable_classes.query(f"panel == '{panel}'").index]
@@ -176,8 +178,8 @@ for num_var in continuous:
             output_dir
             / f"variable_illustration.{num_var}.panel_{panel}.swarm+boxen.svg"
         )
-        # if figfile.exists():
-        #     continue
+        if figfile.exists():
+            continue
 
         data = (
             matrix.loc[:, variable_classes.query(f"panel == '{panel}'").index]
@@ -317,7 +319,7 @@ for df, label1 in [(matrix, "full"), (matrix_reduced, "reduced")]:
 
     for population in parent_population.unique():
         q = parent_population == population
-        if sum(q) < 2:
+        if df.loc[:, q].shape[1] < 2:
             continue
         # kws = kwargs.copy()
         # kws.update(dict(figsize=np.asarray(df.loc[:, q].shape) * 0.05))
