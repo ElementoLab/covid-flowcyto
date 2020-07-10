@@ -1,8 +1,10 @@
 .DEFAULT_GOAL := analysis
 
 
+NAME=$(shell basename `pwd`)
+
 help:  ## Display help and quit
-	@echo Makefile for the $(NAME) package.
+	@echo Makefile for the $(NAME) package/project.
 	@echo Available commands:
 	@grep -E '^[0-9a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m\
@@ -67,7 +69,7 @@ analysis: \
 	results/single_cell/__done__
 
 
-all: requirements analysis
+all: requirements analysis  ## Run all analysis steps in order
 	$(info    Finished with target all)
 
 

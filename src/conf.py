@@ -27,7 +27,7 @@ matrix_imputed_file = data_dir / "matrix_imputed.pq"
 matrix_imputed_reduced_file = data_dir / "matrix_imputed_reduced.pq"
 
 # Sample metadata
-ORIGINAL_FILE_NAME = "clinical_data.joint.20200710.xlsx"
+ORIGINAL_FILE_NAME = "clinical_data.joint.20200710.csv"
 N_CATEGORICAL_COLUMNS = 25
 
 # # variables

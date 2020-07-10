@@ -18,17 +18,27 @@ from src.conf import *
 for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
     _dir.mkdir(exist_ok=True, parents=True)
 
-original = pd.read_excel(
-    original_dir / ORIGINAL_FILE_NAME,
-    na_values=["na", "NT"],
-    # converters={"percents": lambda value: "{}%".format(value * 100)},
-)
+if ORIGINAL_FILE_NAME.endswith(".xlsx"):
+    original = pd.read_excel(
+        original_dir / ORIGINAL_FILE_NAME,
+        na_values=["na", "NT"],
+        # converters={"percents": lambda value: "{}%".format(value * 100)},
+    )
+else:
+    original = pd.read_csv(
+        original_dir / ORIGINAL_FILE_NAME,
+        na_values=["na", "NT"],
+        # converters={"percents": lambda value: "{}%".format(value * 100)},
+    )
 
 # extract only metadata
 meta = original.iloc[:, :N_CATEGORICAL_COLUMNS]
 
-
 meta.columns = meta.columns.str.strip()
+
+# Convert dates
+dates = meta.columns.str.contains("date")
+meta.loc[:, dates] = meta.loc[:, dates].apply(pd.to_datetime)
 
 # derive patient/sample codes
 meta["patient_code"] = "P" + meta["patient_code"].astype(str).str.zfill(3)
@@ -45,12 +55,16 @@ for _, idx in meta.groupby(["patient_code", "accession"]).groups.items():
 # make sample_name
 meta["sample_id"] = "S" + meta["accession"].str.extract(r"P\d+-(\d+)")[0]
 meta.index = (
-    (meta["patient_code"] + "-" + meta["sample_id"]).rename("sample_name") + "-" + meta["replicate"]
+    (meta["patient_code"] + "-" + meta["sample_id"]).rename("sample_name")
+    + "-"
+    + meta["replicate"]
 )
 
 meta["age"] = meta["age"].astype(float)
 meta["sex"] = (
-    meta["sex"].str.replace("m", "Male", case=False).str.replace("f", "Female", case=False)
+    meta["sex"]
+    .str.replace("m", "Male", case=False)
+    .str.replace("f", "Female", case=False)
 )
 
 
@@ -58,11 +72,15 @@ meta["sex"] = (
 meta["death"] = meta["alive"]
 
 # hospitalization
-meta["hospitalization"] = meta["hospitalized"].replace("no", "False").replace("yes", "True")
+meta["hospitalization"] = (
+    meta["hospitalized"].replace("no", "False").replace("yes", "True")
+)
 
 # intubation
 meta["intubation"] = (
-    meta["intubated"].replace("not intubated", "False").replace("intubated", "True")
+    meta["intubated"]
+    .replace("not intubated", "False")
+    .replace("intubated", "True")
 )
 
 
@@ -75,7 +93,9 @@ meta["time_symptoms"] = (
 )
 
 # treatment
-meta["tocilizumab"] = meta["tocilizumab"].replace("no", "False").replace("yes", "True")
+meta["tocilizumab"] = (
+    meta["tocilizumab"].replace("no", "False").replace("yes", "True")
+)
 
 # # pre-post treatment samples
 t = meta["tocilizumab"] == "True"
@@ -96,7 +116,9 @@ meta["bmi"] = meta["bmi"].astype(float)
 
 
 meta["heme"] = meta["heme"].replace("no", "False").replace("yes", "True")
-meta["bone_marrow_transplant"] = meta["bmt"].replace("no", "False").replace("yes", "True")
+meta["bone_marrow_transplant"] = (
+    meta["bmt"].replace("no", "False").replace("yes", "True")
+)
 meta["pcr"] = meta["pcr"].replace("neg", "False").replace("pos", "True")
 
 # extract commorbidities
@@ -105,7 +127,8 @@ meta["pcr"] = meta["pcr"].replace("neg", "False").replace("pos", "True")
 lymp = ["CLL", "AML", "DLBCL", "MM", "ALL"]
 meta["leukemia_lymphoma"] = "False"
 meta.loc[
-    meta["other"].str.contains("|".join(lymp), case=False).fillna(False), "leukemia_lymphoma"
+    meta["other"].str.contains("|".join(lymp), case=False).fillna(False),
+    "leukemia_lymphoma",
 ] = "True"
 
 
@@ -115,7 +138,8 @@ meta.loc[
 meta["hypertension"] = meta["HTN"].replace("yes", "True")
 # for patients in the 'mild' and 'severe' groups, assume NaN means False
 meta.loc[
-    pd.isnull(meta["hypertension"]) & meta["severity_group"].isin(["severe", "mild"]),
+    pd.isnull(meta["hypertension"])
+    & meta["severity_group"].isin(["severe", "mild"]),
     "hypertension",
 ] = "False"
 
@@ -123,17 +147,23 @@ meta.loc[
 # # Diabetes
 meta["diabetes"] = meta["DM"].replace("no", "False").replace("yes", "True")
 meta.loc[
-    pd.isnull(meta["diabetes"]) & meta["severity_group"].isin(["severe", "mild"]), "diabetes",
+    pd.isnull(meta["diabetes"])
+    & meta["severity_group"].isin(["severe", "mild"]),
+    "diabetes",
 ] = "False"
 
 # # Hyperlypidemia
 meta["hyperlypidemia"] = "False"
-meta.loc[meta["other"].str.contains("HL", case=False).fillna(False), "hyperlypidemia"] = "True"
+meta.loc[
+    meta["other"].str.contains("HL", case=False).fillna(False), "hyperlypidemia"
+] = "True"
 
 
 # # Sleep apnea
 meta["sleep_apnea"] = "False"
-meta.loc[meta["other"].str.contains("OSA", case=False).fillna(False), "sleep_apnea"] = "True"
+meta.loc[
+    meta["other"].str.contains("OSA", case=False).fillna(False), "sleep_apnea"
+] = "True"
 
 
 # Cleanup strings
@@ -144,19 +174,29 @@ for col in meta.loc[:, meta.dtypes == "object"]:
 
 # Normal donors vs patients
 meta["patient"] = (
-    (meta["severity_group"] != "negative").replace(False, "Control").replace(True, "Patient")
+    (meta["severity_group"] != "negative")
+    .replace(False, "Control")
+    .replace(True, "Patient")
 )
 
 
 # COVID19 vs rest
-meta["COVID19"] = (~meta["severity_group"].isin(["negative", "non-covid"])).astype(str)
+meta["COVID19"] = (
+    ~meta["severity_group"].isin(["negative", "non-covid"])
+).astype(str)
 
 
 # make ordered Categorical
 categories = {
     "patient": ["Control", "Patient"],
     "COVID19": ["False", "True"],
-    "severity_group": ["negative", "non-covid", "mild", "severe", "convalescent"],
+    "severity_group": [
+        "negative",
+        "non-covid",
+        "mild",
+        "severe",
+        "convalescent",
+    ],
     "hospitalization": ["False", "True"],
     "intubation": ["False", "True"],
     "death": ["alive", "dead"],
@@ -176,14 +216,18 @@ categories = {
 }
 
 for col in categories:
-    meta[col] = pd.Categorical(meta[col], categories=categories[col], ordered=True)
+    meta[col] = pd.Categorical(
+        meta[col], categories=categories[col], ordered=True
+    )
 
 # add batch from FCS files metadata
 batch_dates_file = metadata_dir / "facs_dates.reduced.csv"
 if batch_dates_file.exists():
     batch = pd.read_csv(batch_dates_file)
     batch["processing_batch"] = pd.to_datetime(batch["processing_batch"])
-    batch["processing_batch_categorical"] = pd.Categorical(batch["processing_batch"], ordered=True)
+    batch["processing_batch_categorical"] = pd.Categorical(
+        batch["processing_batch"], ordered=True
+    )
     idx = meta.index
     meta = meta.merge(batch, how="left", validate="many_to_one")
     meta.index = idx
@@ -233,8 +277,17 @@ for c1 in matrix.columns:
             matrix = matrix.drop(c2, axis=1)
 
 
-# Values are read as fraction from the excel
-matrix *= 100
+if ORIGINAL_FILE_NAME.endswith(".xlsx"):
+    # Values are read as fraction from the excel
+    matrix *= 100
+else:
+    # But stuff is kept as string in the CSV
+    matrix = matrix.apply(
+        lambda x: x.astype(str)
+        .str.replace("%", "")
+        .str.replace("#DIV/0!", "NaN")
+        .astype(float)
+    )
 
 
 # Fix a few variables which are not percentage but ratios
