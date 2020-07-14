@@ -19,6 +19,7 @@ dist/
 *.xlsx
 *.txt
 *.csv
+*.pq
 *.tsv
 *.pkl
 *.pickle

@@ -67,7 +67,13 @@ def get_population(
         raise ValueError("")
 
     xx = ser + abs(ser.min())
-    n, y = get_best_mixture_number(xx, return_prediction=True, **kwargs)
+    done = False
+    while not done:
+        try:
+            n, y = get_best_mixture_number(xx, return_prediction=True, **kwargs)
+        except ValueError:  # "Number of labels is 1. Valid values are 2 to n_samples - 1 (inclusive)"
+            continue
+        done = True
     done = False
     while not done:
         try:
@@ -101,10 +107,17 @@ plot_gating = False
 overwrite = False
 n = 2000
 
-pos_gate_names = {"WB_Memory": "CD3+", "WB_IgG_IgM": "CD19+"}
+pos_gate_names = {
+    "WB_Memory": "CD3+",
+    "WB_IgG_IgM": "CD19+",
+    "WB_Checkpoint": "CD3+",
+    "WB_Treg": "CD3+",
+}
 pos_gate_channels = {
     "WB_Memory": "CD3(FITC-A)",
     "WB_IgG_IgM": "CD19(Pacific Blue-A)",
+    "WB_Checkpoint": "CD3(FITC-A)",
+    "WB_Treg": "sCD3(FITC-A)",
 }
 
 # Extract matrix, gate
@@ -116,7 +129,8 @@ pos_gate_channels = {
 
 failures = list()
 
-for panel in panels:
+# for panel in panels:
+for panel in pos_gate_names:
     print(panel)
     for sample_id in meta["sample_id"].unique():
         print(sample_id)
@@ -153,7 +167,7 @@ for panel in panels:
                 fcs_file = fff[0]
             except IndexError:
                 print(f"Sample {sample_id} is missing!")
-                failures.append(sample_id)
+                failures.append((panel, sample_id))
                 continue
 
         try:
@@ -161,7 +175,7 @@ for panel in panels:
             # some corrupted files will fail here but the correct one will be read after
             # e.g. 195_WB_IgG_IgM
         except:
-            failures.append(sample_id)
+            failures.append((panel, sample_id))
             continue
         ch_names = get_channel_labels(s)
         s.apply_compensation(s.metadata["spill"])
@@ -252,159 +266,42 @@ for panel in panels:
         print(f"Sample '{sample_id}' has {xdf.shape[0]} filtered cells.")
 
 
-# Actually run analysis
-# panel = "WB_IgG_IgM"
+# Concatenate
 
-for panel in panels:
-    csv_dir = output_dir / panel
+meta_m = meta.copy().drop(["other", "flow_comment"], axis=1)
 
-    df = pd.concat(
-        [
-            pd.read_csv(f, index_col=0).assign(sample=f.parts[-1].split(".")[0])
-            for f in csv_dir.glob("*.subsampled.csv.gz")
-        ]
-    )
+# # since h5ad cannot serialize datetime, let's convert to str
+for col in meta_m.columns[meta_m.dtypes == "datetime64[ns]"]:
+    meta_m[col] = meta_m[col].astype(str)
 
-    # sample 'P060-S074-R01' has channel 'FITC-A' instead of 'sIgG(FITC-A)'
-    df.loc[df["sIgG(FITC-A)"].isnull(), "sIgG(FITC-A)"] = df.loc[
-        df["sIgG(FITC-A)"].isnull(), "FITC-A"
-    ]
-    df = df.drop("FITC-A", axis=1).reset_index(drop=True)
+for panel in pos_gate_names:
+    panel_dir = output_dir / panel
 
-    ann = AnnData(df.iloc[:, 4:-3], obs=dict(sample=df["sample"]))
+    for label, func in [("full", np.logical_not), ("subsampled", np.identity)]:
+        df = pd.concat(
+            [
+                pd.read_csv(f, index_col=0).assign(
+                    sample=f.parts[-1].split(".")[0]
+                )
+                for f in panel_dir.glob("*.csv.gz")
+                if func(int("subsampled" in str(f))).squeeze()
+            ]
+        )
+        cell = df.index
+        df = df.reset_index(drop=True)
+        if panel == "WB_IgG_IgM":
+            # sample 'P060-S074-R01' has channel 'FITC-A' instead of 'sIgG(FITC-A)'
+            df.loc[df["sIgG(FITC-A)"].isnull(), "sIgG(FITC-A)"] = df.loc[
+                df["sIgG(FITC-A)"].isnull(), "FITC-A"
+            ]
+            df = df.drop("FITC-A", axis=1)
 
+        x = df.iloc[:, 4:-3]
 
-# def further():
-#     # drop FSC, SSC, Time
-#     x = xdf.iloc[:, 4:-2]
+        # merge with metadata
+        df = df.drop(x.columns, axis=1).merge(
+            meta_m, left_on="sample", right_on="sample_name"
+        )
 
-#     # # Select columns to use for selecting cells
-#     # cols = x.columns
-
-#     # positives = dict()
-#     # n, m = get_grid_dims(len(cols))
-#     # fig, axes = plt.subplots(n, m, figsize=(m * 6, n * 4))
-#     # axes = axes.flatten()
-#     # for i, col in tqdm(enumerate(cols)):
-#     #     positives[col] = get_positive_population(df[col], plot=True, ax=axes[i], min_mix=3)
-#     # fig.savefig(
-#     #     output_dir / f"{sample_name}_{panel}.gaussian_thresholds.min_3.svg",
-#     #     bbox_inches="tight",
-#     #     dpi=300,
-#     # )
-
-#     x2 = x  # .sample(n=10000)
-#     print("anndata")
-#     a = AnnData(x2.drop(["Viability(APC-R700-A)", "CD3(FITC-A)"], 1))
-
-#     sc.pp.pca(a)
-#     sc.pp.neighbors(a)
-#     sc.tl.umap(a)
-#     sc.tl.leiden(a, key_added="cluster", resolution=0.25)
-#     # sc.pl.pca(a, color=a.var.index.tolist() + ["cluster"])
-#     # sc.pl.umap(a, color=a.var.index.tolist() + ["cluster"])
-
-#     fig = sc.pl.umap(a, color=a.var.index.tolist() + ["cluster"], show=False)[
-#         0
-#     ].figure
-#     fig.savefig(
-#         output_dir / panel / f"{sample_name}.single_cell.umap.all_markers.svg",
-#         **figkws,
-#     )
-
-#     cluster_means = a.to_df().groupby(a.obs["cluster"]).mean()
-#     cluster_means["ratio"] = (
-#         cluster_means["CD8(APC-H7-A)"] / cluster_means["CD4(BV605-A)"]
-#     )
-#     cluster_means = cluster_means.sort_values("ratio")
-#     cluster_means = cluster_means.sort_values("CD4(BV605-A)")
-#     cells = a.to_df().groupby(a.obs["cluster"]).size().rename("Cells")
-#     cells_p = ((cells / cells.sum()) * 100).rename("Cells (%)")
-#     cells = pd.concat([cells, cells_p], 1)
-#     grid = sns.clustermap(
-#         cluster_means.T.drop("ratio"),
-#         metric="correlation",
-#         z_score=0,
-#         cmap="RdBu_r",
-#         center=0,
-#         robust=True,
-#         col_cluster=False,
-#         row_colors=cluster_means.mean().rename("Mean"),
-#         col_colors=cells,
-#         cbar_kws=dict(label="Intensity (Z-score)"),
-#         figsize=(6, 4),
-#     )
-#     grid.savefig(
-#         output_dir
-#         / panel
-#         / f"{sample_name}.single_cell.leiden_clusters.mean.clustermap.svg",
-#         **figkws,
-#     )
-
-#     for label, sdf in [
-#         ("CD4", cluster_means.query("ratio < 1")),
-#         ("CD8", cluster_means.query("ratio > 1")),
-#     ]:
-#         sdf = sdf.loc[:, ~sdf.columns.str.contains(r"CD4\(|CD8\(")]
-#         grid = sns.clustermap(
-#             sdf.T.drop("ratio"),
-#             metric="correlation",
-#             # z_score=0,
-#             # cmap="RdBu_r",
-#             # center=0,
-#             # cbar_kws=dict(label="Intensity (Z-score)"),
-#             cbar_kws=dict(label="Intensity"),
-#             robust=True,
-#             col_cluster=True,
-#             row_colors=cluster_means.mean().rename("Mean"),
-#             col_colors=cells,
-#             figsize=(6, 4),
-#         )
-#         grid.savefig(
-#             output_dir
-#             / panel
-#             / f"{sample_name}.single_cell.leiden_clusters.only_{label}.mean.clustermap.svg",
-#             **figkws,
-#         )
-
-#     # # MiniSOM
-#     # xv = x.values
-#     # sx = 6
-#     # sy = 6
-#     # max_iter = 10000
-
-#     # som = MiniSom(
-#     #     sx, sy, xv.shape[1], sigma=0.3, learning_rate=0.5
-#     # )  # initialization of 6x6 SOM
-#     # som.pca_weights_init(xv)
-#     # som.train(xv, max_iter, random_order=True, verbose=True)
-
-#     # w = np.asarray([som.winner(xv[i]) for i in range(xv.shape[0])])
-#     # # # get cells from given SOM square
-#     # _means = dict()
-#     # for i in range(sx):
-#     #     for j in range(sy):
-#     #         _means[(i, j)] = x[(w == [i, j]).all(1)].mean()
-#     # means = pd.DataFrame(_means).rename_axis(columns=["x", "y"])
-
-#     # fig, axes = plt.subplots(1, means.shape[0])
-#     # for i, channel in enumerate(sorted(means.index)):
-#     #     axes[i].set_title(channel)
-#     #     axes[i].imshow(means.T.pivot_table(index="x", columns="y", values=channel))
-
-#     # # update
-#     # target = 0.5
-#     # error = list()
-#     # # for i in range(max_iter):
-#     # e = np.inf
-#     # i = 0
-#     # while e > target:
-#     #     if i % 100 == 0:
-#     #         print(i)
-#     #     som.update(xv[i], som.winner(xv[i]), i, 1)
-#     #     e = som.quantization_error(xv)
-#     #     error.append(e)
-#     #     i += 1
-
-#     # dist = som.distance_map()
-#     # som.activation_response(xv)
+        a = AnnData(x, obs=df)
+        a.write_h5ad(panel_dir / f"{panel}.concatenated.{label}.h5ad")
