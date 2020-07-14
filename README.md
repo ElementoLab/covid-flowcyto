@@ -6,9 +6,20 @@
 - [This CSV file](data/original/clinical_data.joint.20200710.csv) contains the original manually curated data
 - The [metadata](metadata) directory contains parsed/further curated metadata
 - The [src](src) directory contains source code used to analyze the data
+- Raw data (e.g. CSV or FCS files) will be under the [data](data) directory.
+- Outputs from the analysis will be present in a `results` directory, with subfolders pertaining to each part of the analysis described below.
 
+
+FCS files are hosted on Cytobank. An account is needed to download the files, which can be made programmatically with the `make get_fcs` command (see below).
+To connect with your account, simply add your credentials to a file named `~/.cytobank.auth.json` containing the fields `username` and `password`:
+```json
+{"username": "username", "password": "ABCD1234"}
+```
+Be sure to make the file read-only (e.g. `chmod 400 ~/.cytobank.auth.json`).
 
 ## Reproducibility
+
+### Running
 
 To see all available steps type:
 ```bash
@@ -36,4 +47,24 @@ To reproduce analysis, simply do:
 ```bash
 $ make requirements
 $ make
+```
+
+### Requirements
+
+- Python 3.7+ (was run on 3.8.2)
+- Python packages as specified in the [requirements file](requirements.txt) - install with `make requirements` or `pip install -r requirements.txt`.
+
+
+### Virtual environment
+
+It is recommended to compartimentalize the analysis software from the system's using virtual environments, for example.
+
+Here's how to create one with the repository and installed requirements:
+
+```bash
+git clone git@github.com:ElementoLab/covid-facs.git
+cd covid-facs
+virtualenv .venv
+source activate .venv/bin/activate
+pip install -r requirements.txt
 ```
