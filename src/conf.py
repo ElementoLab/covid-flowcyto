@@ -5,11 +5,15 @@
 
 import json
 from typing import Union
-from pathlib import Path as _Path
 
-import pandas as _pd
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
 
-import imc
+from imc.types import Path
+import imc  # this import is here to allow automatic colorbars in clustermap
 
 
 def minmax_scale(x):
@@ -20,15 +24,28 @@ def zscore(x, axis=0):
     return (x - x.mean(axis)) / x.std(axis)
 
 
-Series = Union[_pd.Series]
-DataFrame = Union[_pd.DataFrame]
+def log_pvalues(x, f=0.1):
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ll = -np.log10(x)
+        rmax = ll[ll != np.inf].max()
+        return ll.replace(np.inf, rmax + rmax * f)
+
+
+def text(x, y, s, ax=None, **kws):
+    if ax is None:
+        ax = plt.gca()
+    return [ax.text(x=_x, y=_y, s=_s, **kws) for _x, _y, _s in zip(x, y, s)]
+
+
+Series = Union[pd.Series]
+DataFrame = Union[pd.DataFrame]
 
 figkws = dict(dpi=300, bbox_inches="tight")
 
-original_dir = _Path("data") / "original"
-metadata_dir = _Path("metadata")
-data_dir = _Path("data")
-results_dir = _Path("results")
+original_dir = Path("data") / "original"
+metadata_dir = Path("metadata")
+data_dir = Path("data")
+results_dir = Path("results")
 
 for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
     _dir.mkdir(exist_ok=True, parents=True)
@@ -90,9 +107,9 @@ VARIABLES = CATEGORIES + CONTINUOUS
 
 
 try:
-    meta = _pd.read_parquet(metadata_file)
-    matrix = _pd.read_parquet(matrix_imputed_file)
-    matrix_reduced = _pd.read_parquet(matrix_imputed_reduced_file)
+    meta = pd.read_parquet(metadata_file)
+    matrix = pd.read_parquet(matrix_imputed_file)
+    matrix_reduced = pd.read_parquet(matrix_imputed_reduced_file)
     categories = CATEGORIES
     continuous = CONTINUOUS
     sample_variables = meta[categories + continuous]
@@ -107,7 +124,7 @@ try:
 
     variable_classes = (
         parent_population.to_frame()
-        .join(_pd.Series(panel, name="panel"))
+        .join(pd.Series(panel, name="panel"))
         .join(matrix.mean().rename("Mean"))
         .join(
             matrix.loc[meta["patient"] == "Control"]

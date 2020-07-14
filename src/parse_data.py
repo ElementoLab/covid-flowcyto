@@ -3,12 +3,8 @@
 """
 """
 
-from pathlib import Path
-import pandas as pd
-import numpy as np
+
 from sklearn.preprocessing import LabelEncoder
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 from src.conf import *
 
@@ -192,6 +188,7 @@ meta["COVID19"] = (
 categories = {
     "patient": ["Control", "Patient"],
     "COVID19": ["False", "True"],
+    "sex": ["Female", "Male"],
     "severity_group": [
         "negative",
         "non-covid",
