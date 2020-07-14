@@ -1,7 +1,5 @@
-setuptools-scm>=3.3.3
 numpy>=1.15.0
 scipy>=1.0.0
-fastcluster
 pandas>=1.0.1
 matplotlib
 seaborn>=0.10.0
@@ -9,11 +7,20 @@ scikit-learn>=0.19.1
 statsmodels>=0.8.0
 patsy>=0.4.1
 requests>=2.21.0
-umap-learn
 
+parmap
 fancyimpute
+statsmodels
 adjustText
 FlowKit
 MiniSOM
+flowsom
+scanpy
+umap-learn
+fastcluster
+anndata
+GPy
+git+git://github.com/SheffieldML/GPclust@9f746598f2e383db5a4e89ef3bfc0270451c7873#egg=GPclust
+
 
 imc

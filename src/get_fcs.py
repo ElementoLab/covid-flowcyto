@@ -5,12 +5,10 @@
 Download all FCS files from Cytobank.
 """
 
-
 import sys
-import json
-from pathlib import Path
-
 import requests
+
+from src.conf import *
 
 
 API_URL = "https://premium.cytobank.org/cytobank/api/v1/"
@@ -37,7 +35,8 @@ def main():
     for experiment in EXPERIMENTS:
         # #  List FCSs
         res2 = requests.get(
-            API_URL + request_type + f"/{experiment}/" + "fcs_files", headers=headers
+            API_URL + request_type + f"/{experiment}/" + "fcs_files",
+            headers=headers,
         )
         res2.raise_for_status()
 
@@ -51,7 +50,10 @@ def main():
                 continue
             print(experiment, fid)
             res3 = requests.get(
-                API_URL + request_type + f"/{experiment}/" + f"fcs_files/{fid}/download",
+                API_URL
+                + request_type
+                + f"/{experiment}/"
+                + f"fcs_files/{fid}/download",
                 headers=headers,
             )
             with open(output_file, "wb") as f:

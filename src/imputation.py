@@ -3,12 +3,7 @@
 """
 """
 
-from pathlib import Path
-
-import pandas as pd
 from sklearn.preprocessing import LabelEncoder
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.impute import KNNImputer
 from fancyimpute import MatrixFactorization
 from sklearn.decomposition import PCA, NMF

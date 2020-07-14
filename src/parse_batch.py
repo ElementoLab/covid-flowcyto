@@ -4,9 +4,6 @@
 This script finds the processing date of each sample from the FCS metadata.
 """
 
-
-import json
-
 import pandas as pd
 import flowkit as fk
 
