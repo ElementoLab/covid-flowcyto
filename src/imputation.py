@@ -71,4 +71,9 @@ for var in matrix_imp_MF.columns:
     else:  # this will never happen
         raise ValueError
 
+# TODO: reduced redundancy for e.g. 'CD127_dim_CD25_Br/CD4+' and 'CD127_dim_CD25_Br/LY' populations
+# Now in case the same exact population exists with two parents
+# sep = matrix_reduced.columns.to_series().str.split("/").apply(pd.Series)
+# sep.loc[sep.duplicated(subset=0)]
+
 matrix_reduced.to_parquet(matrix_imputed_reduced_file)
