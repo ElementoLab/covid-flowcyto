@@ -17,6 +17,7 @@ MiniSOM
 flowsom
 scanpy
 umap-learn
+pynndescent
 fastcluster
 anndata
 GPy
