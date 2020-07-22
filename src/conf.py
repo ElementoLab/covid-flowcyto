@@ -4,7 +4,7 @@
 """
 
 import json
-from typing import Union
+from typing import Union, TypedDict, List, Dict, Optional
 
 import pandas as pd
 import numpy as np
@@ -16,6 +16,13 @@ from imc.types import Path
 import imc  # this import is here to allow automatic colorbars in clustermap
 
 
+class Model(TypedDict):
+    covariates: List[str]
+    categories: List[str]
+    continuous: List[str]
+    formula: Optional[str]
+
+
 def minmax_scale(x):
     return (x - x.min()) / (x.max() - x.min())
 
@@ -24,11 +31,15 @@ def zscore(x, axis=0):
     return (x - x.mean(axis)) / x.std(axis)
 
 
-def log_pvalues(x, f=0.1):
+def log_pvalues(x, f=0.1, clip=False):
     with np.errstate(divide="ignore", invalid="ignore"):
         ll = -np.log10(x)
         rmax = ll[ll != np.inf].max()
-        return ll.replace(np.inf, rmax + rmax * f)
+        y = ll.replace(np.inf, rmax + rmax * f)
+        if clip:
+            return y.clip(ll.quantile(clip))
+        else:
+            return y
 
 
 def text(x, y, s, ax=None, **kws):
@@ -56,7 +67,7 @@ matrix_imputed_file = data_dir / "matrix_imputed.pq"
 matrix_imputed_reduced_file = data_dir / "matrix_imputed_reduced.pq"
 
 # Sample metadata
-ORIGINAL_FILE_NAME = "clinical_data.joint.20200710.csv"
+ORIGINAL_FILE_NAME = "clinical_data.joint.20200710.xlsx"
 N_CATEGORICAL_COLUMNS = 25
 
 # # variables
@@ -109,7 +120,7 @@ VARIABLES = CATEGORIES + CONTINUOUS
 try:
     meta = pd.read_parquet(metadata_file)
     matrix = pd.read_parquet(matrix_imputed_file)
-    matrix_reduced = pd.read_parquet(matrix_imputed_reduced_file)
+    matrix_red_var = pd.read_parquet(matrix_imputed_reduced_file)
     categories = CATEGORIES
     continuous = CONTINUOUS
     sample_variables = meta[categories + continuous]
@@ -138,4 +149,7 @@ try:
         )
     )
 except:
-    pass
+    print(
+        "Could not load metadata and data dataframes. "
+        "They probably don't exist yet."
+    )

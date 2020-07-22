@@ -71,7 +71,7 @@ def rename_back(x: Union[Series, str]) -> Union[Series, str]:
     return y[0] if isinstance(x, str) else y
 
 
-def fit_model(variable, covariates, data):
+def fit_model(variable, covariates, data, formula=None):
     cols = [
         "coef",
         "ci_0.025",
@@ -83,7 +83,10 @@ def fit_model(variable, covariates, data):
         "bic",
         "variable",
     ]
-    formula = f"{variable} ~ {' + '.join(covariates)}"
+    if formula is None:
+        formula = f"{variable} ~ {' + '.join(covariates)}"
+    else:
+        formula = variable + formula
     fam = sm.families.Gamma(sm.families.links.log())
     md = smf.glm(formula, data, family=fam)
     try:
@@ -121,7 +124,7 @@ output_dir.mkdir(exist_ok=True, parents=True)
 
 meta = pd.read_parquet(metadata_file)
 matrix = pd.read_parquet(matrix_imputed_file).sort_index(0).sort_index(1)
-matrix_reduced = (
+matrix_red_var = (
     pd.read_parquet(matrix_imputed_reduced_file).sort_index(0).sort_index(1)
 )
 
@@ -136,7 +139,7 @@ parent_population = cols[1].rename("parent_population")
 
 
 # Decide if it makes sense to use full matrix of with less variable redundancy
-MATRIX_TO_USE = matrix_reduced
+MATRIX_TO_USE = matrix_red_var
 # in order to use the variable names in linear model, names must be cleaned up
 matrix_c = MATRIX_TO_USE.copy()
 matrix_c.columns = rename_forward(matrix_c.columns)
@@ -151,82 +154,42 @@ matrix_c_reduced = (
 )
 
 
-# Define models
-models = dict()
-
-# Model 1: compare normals vs patients - major categorical factors + sex + age
-categories = ["sex", "COVID19"]  # "patient",
-continuous = ["age"]
-technical = [
-    "processing_batch_continuous"
-]  # "processing_batch_continuous", "processing_batch_categorical"
-variables = categories + continuous + technical
-model_name = "1-general"
-models[model_name] = dict(
-    variables=variables, categories=categories, continuous=continuous
-)
-
-
-# Model 2: look deep into patients
-categories = [
-    "sex",
-    "COVID19",
-    "severity_group",
-    "hospitalization",
-    "intubation",
-    "death",
-    "diabetes",
-    "obesity",
-    "hypertension",
-    # "date"
-]
-continuous = ["age", "time_symptoms"]  # "bmi", "time_symptoms"]
-technical = ["processing_batch_continuous"]
-variables = categories + continuous + technical
-model_name = "2-covid"
-models[model_name] = dict(
-    variables=variables, categories=categories, continuous=continuous
-)
-
-
-# Model 3: look at changes in treatment
-categories = [
-    "severe",  # <- take only severe patients
-    "sex",
-    # "hospitalization",
-    # "intubation",
-    # "death",
-    # "diabetes",
-    # "obesity", <- no overweight patients that are severe,
-    # "hypertension",
-    "tocilizumab",
-]
-continuous = [
-    "age",
-    # "bmi",
-    "time_symptoms",
-]
-technical = ["processing_batch_continuous"]
-variables = categories + continuous + technical
-model_name = "3-treatment"
-models[model_name] = dict(
-    variables=variables, categories=categories, continuous=continuous
-)
+# Read up model specifications
+specs = json.load(open("metadata/model_specifications.json", "r"))
+models: Dict[str, Model] = dict()
+for name, model in specs.items():
+    models[name] = Model(**model)
 
 
 results = dict()
 
 # Fit
+meta_red = pd.read_parquet(metadata_dir / "annotation.reduced_per_patient.pq")
+red_pat_early = pd.read_parquet("data/matrix_imputed_reduced.red_pat_early.pq")
+red_pat_early.columns = rename_forward(red_pat_early.columns)
+red_pat_median = pd.read_parquet(
+    "data/matrix_imputed_reduced.red_pat_median.pq"
+)
+red_pat_median.columns = rename_forward(red_pat_median.columns)
 
-## m, d, label, fit_vars = (meta_reduced, matrix_c_reduced, "reduced", variables)
 
 for model_name, model in models.items():
-    for m, d, label, fit_vars in [
-        # (meta, matrix_c, "original", model["variables"]),
-        (meta_reduced, matrix_c_reduced, "reduced", model["variables"]),
-    ]:
+    formula = model["formula"] if "formula" in model else None
+
+    ## m, d, label, fit_vars = (meta_reduced, matrix_c_reduced, "reduced", variables)
+    matrices = [
+        (meta, matrix_c, "original", model["covariates"]),
+        (meta_reduced, matrix_c_reduced, "reduced", model["covariates"]),
+        (meta_red, red_pat_early, "reduced_early", model["covariates"],),
+        (meta_red, red_pat_median, "reduced_median", model["covariates"],),
+    ]
+    for m, d, label, fit_vars in matrices:
         # data = zscore(d).join(m[fit_vars]).dropna()
         data = d.join(m[fit_vars]).dropna()
+
+        # remove unused levels
+        for cat in data.columns[data.dtypes == "category"]:
+            data[cat] = data[cat].cat.remove_unused_categories()
 
         u = data.nunique() == 1
         if u.any():
@@ -239,9 +202,13 @@ for model_name, model in models.items():
         data.sort_values(fit_vars).to_csv(
             output_dir / f"model_X_matrix.{model_name}.{label}.csv"
         )
-
         _res = parmap.map(
-            fit_model, d.columns, covariates=fit_vars, data=data, pm_pbar=True
+            fit_model,
+            d.columns,
+            covariates=fit_vars,
+            data=data,
+            formula=formula,
+            pm_pbar=True,
         )
         res = pd.concat(_res).rename_axis(index="comparison")
         res["qval"] = multipletests(res["pval"].fillna(1), method="fdr_bh")[1]
@@ -254,26 +221,75 @@ for model_name, model in models.items():
 
 
 # Compare models (original vs reduced data)
-fig, axes = plt.subplots(
-    2, len(models), figsize=(3 * len(models), 3 * 2), sharex="row", sharey="row"
-)
-for i, (model_name, _) in enumerate(models.items()):
-    a = results[(model_name, "original")]
-    b = results[(model_name, "reduced")]
+from scipy.stats import pearsonr
 
-    assert (a.index == b.index).all()
-    close = np.allclose(a["coef"], b["coef"])
-    axes[0, i].scatter(
-        np.tanh(a["coef"]), np.tanh(b["coef"]), s=2, alpha=0.5, rasterized=True
+opts = [
+    ("original", "reduced"),
+    ("reduced", "reduced_early"),
+    ("reduced", "reduced_median"),
+]
+
+for a, b in opts:
+    fig, axes = plt.subplots(
+        2,
+        len(models),
+        figsize=(3 * len(models), 3 * 2),
+        # sharex="row",
+        # sharey="row",
     )
-    axes[1, i].scatter(a["pval"], b["pval"], s=2, alpha=0.5, rasterized=True)
-    axes[0, i].set(title=model_name, ylabel="Reduced")
-    axes[1, i].set(xlabel="Original", ylabel="Reduced")
-fig.savefig(output_dir / "differential.model_comparison.svg", **figkws)
+    for i, (model_name, _) in enumerate(models.items()):
+        x = results[(model_name, a)].drop("Intercept")
+        y = results[(model_name, b)].drop("Intercept")
+
+        assert (x.index == y.index).all()
+        close = np.allclose(x["coef"], y["coef"])
+        kw = dict(linestyle="--", color="grey", alpha=0.2)
+        kws = dict(s=2, alpha=0.5, rasterized=True)
+
+        cx = x["coef"].clip(-20, 20)
+        cy = y["coef"].clip(-20, 20)
+        c = pd.concat([cx, cy], 1)
+        cdna = c.dropna()
+        lpx = log_pvalues(x["pval"])  # , clip=0.95
+        lpy = log_pvalues(y["pval"])  # , clip=0.95
+        lp = pd.concat([lpx, lpy], 1)
+        lpdna = lp.dropna()
+
+        # axes[0, i].scatter(np.tanh(x["coef"]), np.tanh(y["coef"]), **kws)
+        cv = max(cx.abs().max(), cy.abs().max())
+        mcv = -((1 / 8) * cv)
+        pv = max(lpx.max(), lpy.max())
+        cv += cv * 0.1
+        pv += pv * 0.1
+
+        axes[0, i].plot((-cv, cv), (-cv, cv), **kw)
+        axes[1, i].plot((mcv, pv), (mcv, pv), **kw)
+
+        axes[0, i].scatter(cx, cy, c=lp.mean(1), **kws)
+        axes[1, i].scatter(lpx, lpy, c=c.abs().mean(1), **kws)
+        r, p = pearsonr(cdna.iloc[:, 0], cdna.iloc[:, 1])
+        axes[0, i].set(
+            title=model_name + f"\nr = {r:.3f}, p = {p:.2e}",
+            xlim=(-cv, cv),
+            ylim=(-cv, cv),
+        )
+        r, p = pearsonr(lpdna.iloc[:, 0], lpdna.iloc[:, 1])
+        axes[1, i].set(
+            title=f"r = {r:.3f}, p = {p:.2e}",
+            xlabel=a.capitalize(),
+            xlim=(mcv, pv),
+            ylim=(mcv, pv),
+        )
+    axes[0, 0].set(ylabel=f"Coefficient\n{b.capitalize()}")
+    axes[1, 0].set(ylabel=f"-log10(P-value)\n{b.capitalize()}")
+    fig.savefig(
+        output_dir / f"differential.model_comparison.{a}_vs_{b}.svg", **figkws
+    )
+    plt.close(fig)
 
 
 label = "reduced"
-matrix_c = matrix_reduced
+matrix_c = matrix_red_var
 for i, (model_name, model) in enumerate(list(models.items())[1:]):
     # break
     prefix = f"differential.{model_name}.{label}."
@@ -309,12 +325,14 @@ for i, (model_name, model) in enumerate(list(models.items())[1:]):
     grid = sns.clustermap(lpvals, cbar_kws=dict(label="-log10(p-value)"), **ks)
     grid.savefig(output_dir / prefix + "pvals_only.all_vars.clustermap.svg")
 
-    # # # Heatmap combinin both change and significance
+    # # # Heatmap combining both change and significance
     cols = ~coefs.columns.str.contains("|".join(technical))
     grid = sns.clustermap(
         coefs.loc[:, cols].drop("Intercept", axis=1),
         cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
         row_colors=lpvals.loc[:, cols],
+        xticklabels=True,
+        yticklabels=True,
         **ks,
     )
     grid.savefig(output_dir / prefix + "join_lfc_pvals.all_vars.clustermap.svg")
@@ -335,7 +353,7 @@ for i, (model_name, model) in enumerate(list(models.items())[1:]):
     )
 
     # # Volcano plots
-    for variable in model["variables"]:
+    for variable in model["covariates"]:
         cols = lpvals.columns[lpvals.columns.str.contains(variable)]
         n = len(cols)
         if not n:
@@ -392,7 +410,7 @@ for i, (model_name, model) in enumerate(list(models.items())[1:]):
         plt.close(fig)
 
     # # MA plots
-    for variable in model["variables"]:
+    for variable in model["covariates"]:
         cols = lpvals.columns[lpvals.columns.str.contains(variable)]
         n = len(cols)
         if not n:
@@ -461,6 +479,8 @@ for i, (model_name, model) in enumerate(list(models.items())[1:]):
             # print(variable, sigs)
             sigs = sigs.tail(n_plot).index[::-1]
             data = matrix_c[sigs].join(meta[variable]).melt(id_vars=variable)
+            # for the interaction models ->
+            # data = matrix_c[sigs].join(meta[['severity_group',  variable]]).query("severity_group == 'severe'").drop("severity_group", 1).melt(id_vars=variable)
 
             kws = dict(
                 data=data, x=variable, y="value", hue=variable, palette="tab10"
@@ -618,3 +638,79 @@ open(output_dir / "__done__", "w")
 #     output_dir / f"differential.{label}.test_{category}.volcano.over_{base}.svg"
 # )
 # plt.close(fig)
+
+
+# # Illustration of top hits
+n_plot = 20
+patches = (
+    matplotlib.collections.PatchCollection,
+    matplotlib.collections.PathCollection,
+)
+
+interactions = ["severity_group", "intubation", "death", "hospitalization"]
+
+for model_name, model in {
+    k: v for k, v in models.items() if "interaction" in k
+}.items():
+    res = pd.read_csv(
+        output_dir / f"differential.{model_name}.{label}.results.csv",
+        index_col=0,
+    )
+    prefix = f"differential.{model_name}.{label}.interaction_sex."
+    r = res.sort_values("pval")
+    r = r.loc[r.index.str.contains(":")]
+    r = r.loc[r["coef"].abs() < 6]
+    sigs = r.head(n_plot)["variable"]
+
+    variable = [x for x in model["covariates"] if x != "sex"][0]
+    d = (
+        meta[[variable, "sex"]]
+        .join(matrix[sigs])
+        .melt(id_vars=[variable, "sex"])
+        .dropna()
+    )
+
+    for cat in d.columns[d.dtypes == "category"]:
+        d[cat] = d[cat].cat.remove_unused_categories()
+    # grid = sns.catplot(data=d, x=variable, y='value', col='variable', col_wrap=4, hue="sex", sharey=False)
+
+    kws = dict(data=d, x=variable, y="value", hue="sex", palette="tab10",)
+    grid = sns.FacetGrid(
+        data=d, col="variable", sharey=False, height=3, col_wrap=4
+    )
+    grid.map_dataframe(sns.boxenplot, saturation=0.5, dodge=True, **kws)
+
+    for ax in grid.axes.flat:
+        [x.set_alpha(0.25) for x in ax.get_children() if isinstance(x, patches)]
+    grid.map_dataframe(sns.swarmplot, dodge=True, **kws)
+
+    for ax in grid.axes.flat:
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
+
+    # add stats to title
+    # group = re.findall(r"^.*\[T.(.*)\]", col)[0] if "[" in col else col
+    for ax in grid.axes.flat:
+        var = ax.get_title().replace("variable = ", "")
+        pop = var
+        try:
+            pop, parent = re.findall(r"(.*)/(.*)", pop)[0]
+            ax.set_ylabel(f"% {parent}")
+        except IndexError:
+            pass
+
+        s = res.loc[res["variable"] == var].drop(["Intercept"])
+        s = s.loc[s.index.str.contains(":")]
+        m = s["coef"].abs().argmax()
+        pos = s.iloc[m].name
+        c = s.iloc[m]["coef"]
+        control = meta[variable].min()
+        ax.set_title(
+            pop
+            + f"\n{pos}:\n"
+            + f"Coef = {c:.3f}; "
+            + f"FDR = {s['qval'].min():.3e}"
+        )
+
+    # grid.map(sns.boxplot)
+    grid.savefig(output_dir / prefix + f"{variable}.swarm+boxenplot.svg")
+    plt.close(grid.fig)

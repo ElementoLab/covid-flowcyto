@@ -36,6 +36,7 @@ def fix_clustermap_fonts(grid, fontsize=3):
 
 
 def plot_projection(x, meta, cols, n_dims=4, algo_name="PCA"):
+    cols = [c for c in cols if c in meta.columns]
     n = len(cols)
     fig, axes = plt.subplots(
         n,
@@ -72,7 +73,7 @@ output_dir = results_dir / "unsupervised"
 
 meta = pd.read_parquet(metadata_file)
 matrix = pd.read_parquet(matrix_imputed_file)
-matrix_reduced = pd.read_parquet(matrix_imputed_reduced_file)
+matrix_red_var = pd.read_parquet(matrix_imputed_reduced_file)
 
 
 categories = CATEGORIES
@@ -216,7 +217,7 @@ for num_var in continuous:
 
 # # all samples, all variables, full or reduced
 
-for df, label1 in [(matrix, "full"), (matrix_reduced, "reduced")]:
+for df, label1 in [(matrix, "full"), (matrix_red_var, "reduced")]:
     prefix = f"covid-facs.cell_type_abundances.{label1}."
     kwargs = dict(
         metric="correlation",
@@ -351,36 +352,53 @@ for df, label1 in [(matrix, "full"), (matrix_reduced, "reduced")]:
 
 
 # manifold learning
+# # Here we'll try to use the reduced versions of the matrices too.
+meta_red = pd.read_parquet(metadata_dir / "annotation.reduced_per_patient.pq")
+matrix_red_var_red_pat_median = pd.read_parquet(
+    "data/matrix_imputed_reduced.red_pat_median.pq"
+)
+matrix_red_var_red_pat_early = pd.read_parquet(
+    "data/matrix_imputed_reduced.red_pat_early.pq"
+)
 
 # manifolds = dict()
+for mat, met, label1 in [
+    (matrix, meta, "original"),
+    (matrix_red_var_red_pat_early, meta_red, "red_pat_early"),
+    (matrix_red_var_red_pat_median, meta_red, "red_pat_median"),
+]:
+    for model, kwargs in [
+        (PCA, dict()),
+        (NMF, dict()),
+        (MDS, dict(n_dims=1)),
+        (TSNE, dict(n_dims=1)),
+        (UMAP, dict(n_dims=1)),
+    ][::-1]:
+        name = str(model).split(".")[-1].split("'")[0]
+        model_inst = model()
 
-for model, kwargs in [
-    (PCA, dict()),
-    (NMF, dict()),
-    (MDS, dict(n_dims=1)),
-    (TSNE, dict(n_dims=1)),
-    (UMAP, dict(n_dims=1)),
-][::-1]:
-    name = str(model).split(".")[-1].split("'")[0]
-    model_inst = model()
+        # manifolds[name] = dict()
+        for df, label2 in [(mat, "percentages"), (zscore(mat), "zscore")]:
+            try:  #  this will occur for example in NMF with Z-score transform
+                res = pd.DataFrame(model_inst.fit_transform(df), index=df.index)
+            except ValueError:
+                continue
 
-    # manifolds[name] = dict()
-    for df, label in [(matrix, "percentages"), (zscore(matrix), "zscore")]:
-        try:  #  this will occur for example in NMF with Z-score transform
-            res = pd.DataFrame(model_inst.fit_transform(df), index=df.index)
-        except ValueError:
-            continue
+            fig = plot_projection(
+                res,
+                met,
+                cols=sample_variables.columns,
+                algo_name=name,
+                **kwargs,
+            )
+            fig.savefig(
+                output_dir
+                / f"covid-facs.cell_type_abundances.{name}.{label1}.{label2}.svg",
+                **figkws,
+            )
+            plt.close(fig)
 
-        fig = plot_projection(
-            res, meta, cols=sample_variables.columns, algo_name=name, **kwargs
-        )
-        fig.savefig(
-            output_dir / f"covid-facs.cell_type_abundances.{name}.{label}.svg",
-            **figkws,
-        )
-        plt.close(fig)
-
-        # manifolds[name][label] = res
+        # manifolds[name][label1 + " - " + label2] = res
 
 
 # Add lock file

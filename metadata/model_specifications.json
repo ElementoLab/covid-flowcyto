@@ -1,0 +1,126 @@
+{
+    "1-general": {
+        "variables": [
+            "sex",
+            "COVID19",
+            "age",
+            "processing_batch_continuous"
+        ],
+        "categories": [
+            "sex",
+            "COVID19"
+        ],
+        "continuous": [
+            "age"
+        ],
+        "formula": null
+    },
+    "2-covid": {
+        "variables": [
+            "sex",
+            "COVID19",
+            "severity_group",
+            "hospitalization",
+            "intubation",
+            "death",
+            "diabetes",
+            "obesity",
+            "hypertension",
+            "age",
+            "time_symptoms",
+            "processing_batch_continuous"
+        ],
+        "categories": [
+            "sex",
+            "COVID19",
+            "severity_group",
+            "hospitalization",
+            "intubation",
+            "death",
+            "diabetes",
+            "obesity",
+            "hypertension"
+        ],
+        "continuous": [
+            "age",
+            "time_symptoms"
+        ],
+        "formula": null
+    },
+    "3-treatment": {
+        "variables": [
+            "severe",
+            "tocilizumab",
+            "age",
+            "processing_batch_continuous"
+        ],
+        "categories": [
+            "severe",
+            "tocilizumab"
+        ],
+        "continuous": [
+            "age"
+        ],
+        "formula": null
+    },
+    "4-interaction_sex_severity_group": {
+        "variables": [
+            "severity_group",
+            "sex"
+        ],
+        "categories": [
+            "severity_group",
+            "sex"
+        ],
+        "continuous": [],
+        "formula": "~ sex * severity_group"
+    },
+    "4-interaction_sex_death": {
+        "variables": [
+            "death",
+            "sex"
+        ],
+        "categories": [
+            "death",
+            "sex"
+        ],
+        "continuous": [],
+        "formula": "~ sex * death"
+    },
+    "4-interaction_sex_hospitalization": {
+        "variables": [
+            "hospitalization",
+            "sex"
+        ],
+        "categories": [
+            "hospitalization",
+            "sex"
+        ],
+        "continuous": [],
+        "formula": "~ sex * hospitalization"
+    },
+    "4-interaction_sex_intubation": {
+        "variables": [
+            "intubation",
+            "sex"
+        ],
+        "categories": [
+            "intubation",
+            "sex"
+        ],
+        "continuous": [],
+        "formula": "~ sex * intubation"
+    },
+    "4-interaction_sex_tocilizumab": {
+        "variables": [
+            "tocilizumab",
+            "sex"
+        ],
+        "categories": [
+            "tocilizumab",
+            "sex"
+        ],
+        "continuous": [],
+        "formula": "~ sex * tocilizumab"
+    }
+}
