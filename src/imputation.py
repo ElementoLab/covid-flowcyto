@@ -140,3 +140,78 @@ matrix_red_var_red_pat_early.to_parquet(
     "data/matrix_imputed_reduced.red_pat_early.pq"
 )
 
+
+# Convert percentages to cells per microliter
+var = "WBC_CBC"
+m = meta.dropna(subset=[var])
+d = matrix_imp_MF.loc[m.index]
+d.sort_index().to_csv("data/matrix_imputed.percentages.csv")
+cols = (
+    d.columns.to_series()
+    .str.split("/")
+    .apply(pd.Series)
+    .rename(columns={0: "child", 1: "parent"})
+)
+
+counts = pd.DataFrame(index=d.index, columns=d.columns)
+# extended because the order matters
+for col in cols.loc[cols["parent"].str.contains(r"CD45$|CD45_")].index:
+    counts.loc[:, col] = m[var] * d[col] * 1e3 // 1
+for col in cols.loc[cols["parent"] == "LY"].index:
+    counts.loc[:, col] = d["LY/All_CD45"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD3+"].index:
+    counts.loc[:, col] = d["CD3+/LY"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD4+"].index:
+    counts.loc[:, col] = d["CD4+/CD3+"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD8+"].index:
+    counts.loc[:, col] = d["CD8+/CD3+"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD45RA+_CD4+"].index:
+    counts.loc[:, col] = d["CD45RA+_CD4+/CD4+"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD45RO+_CD4+"].index:
+    counts.loc[:, col] = d["CD45RO+_CD4+/CD4+"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD45RA+_CD8+"].index:
+    counts.loc[:, col] = d["CD45RA+_CD8+/CD8+"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD45RO+_CD8+"].index:
+    counts.loc[:, col] = d["CD45RO+_CD8+/CD8+"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD185+"].index:
+    counts.loc[:, col] = d["CD185+/CD4+"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "All_NK"].index:
+    counts.loc[:, col] = d["All_NK/LY"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD56+_CD16_Br"].index:
+    counts.loc[:, col] = d["CD56+_CD16_Br/All_NK"] * d[col] // 1
+for col in cols.loc[cols["parent"] == "CD19+_CD20+"].index:
+    counts.loc[:, col] = d["CD19+_CD20+/LY"] * d[col] // 1
+
+assert ~counts.isnull().any().any()
+counts = counts.astype(int)
+counts.sort_index().to_csv("data/matrix_imputed.counts.csv")
+counts.to_parquet("data/matrix_imputed.counts.pq")
+
+
+n_examples = 16
+n = int(np.sqrt(n_examples))
+inches = 3
+fig, axes = plt.subplots(
+    n, n, figsize=(n * inches, n * inches), tight_layout=True
+)
+axes = axes.flatten()
+i = 0
+for (name, idx) in cols.groupby("child").groups.items():
+    if i == n_examples:
+        break
+    if len(idx) != 2:
+        continue
+    parents = set(map(lambda x: x[1], idx.str.split("/")))
+    if parents == {"CD4+", "CD8+"}:
+        continue
+    a = counts[idx[0]]  #  + 1
+    b = counts[idx[1]]  #  + 1
+    vmin = pd.concat([a, b], 1).min(1).min()
+    vmax = pd.concat([a, b], 1).max(1).max()
+    axes[i].plot((vmin, vmax), (vmin, vmax), linestyle="--", color="gray")
+    axes[i].scatter(a, b, s=2, alpha=0.5)
+    axes[i].set(xlabel=idx[0], ylabel=idx[1], xscale="symlog", yscale="symlog")
+    i += 1
+fig.savefig(
+    "results/percentages_to_counts.variable_comparison.example.svg", **figkws
+)
