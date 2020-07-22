@@ -293,10 +293,15 @@ else:
 
 
 # Fix a few variables which are not percentage but ratios
-
 matrix.loc[:, matrix.max() > 105] /= 100
 
+
+matrix = matrix.drop("T+B+NK", axis=1)
 
 # Save
 # matrix.to_csv(data_dir / "matrix.csv")
 matrix.sort_index(0).sort_index(1).to_parquet(data_dir / "matrix.pq")
+
+
+# Save version with both just for inspection/sharing
+meta.join(matrix).to_csv(data_dir / "metadata_and_matrix.csv")
