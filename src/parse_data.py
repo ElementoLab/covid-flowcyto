@@ -26,7 +26,9 @@ else:
     )
 
 # extract only metadata
-meta = original.iloc[:, :N_CATEGORICAL_COLUMNS]
+DATA_COLUMN_INDEX = original.columns.tolist().index(NAME_OF_FIRST_DATA_COLUMN)
+
+meta = original.iloc[:, :DATA_COLUMN_INDEX]
 
 meta.columns = meta.columns.str.strip()
 
@@ -262,7 +264,7 @@ meta.to_parquet(metadata_dir / "annotation.pq")
 
 
 # extract FACS values
-matrix = original.iloc[:, N_CATEGORICAL_COLUMNS:]
+matrix = original.iloc[:, DATA_COLUMN_INDEX:]
 matrix.index = meta.index
 matrix.columns.name = "cell_type"
 

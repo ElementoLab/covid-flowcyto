@@ -156,31 +156,31 @@ cols = (
 counts = pd.DataFrame(index=d.index, columns=d.columns)
 # extended because the order matters
 for col in cols.loc[cols["parent"].str.contains(r"CD45$|CD45_")].index:
-    counts.loc[:, col] = m[var] * d[col] * 1e3 // 1
+    counts.loc[:, col] = m[var] * d[col] * 1e3
 for col in cols.loc[cols["parent"] == "LY"].index:
-    counts.loc[:, col] = d["LY/All_CD45"] * d[col] // 1
+    counts.loc[:, col] = d["LY/All_CD45"] * d[col]
 for col in cols.loc[cols["parent"] == "CD3+"].index:
-    counts.loc[:, col] = d["CD3+/LY"] * d[col] // 1
+    counts.loc[:, col] = d["CD3+/LY"] * d[col]
 for col in cols.loc[cols["parent"] == "CD4+"].index:
-    counts.loc[:, col] = d["CD4+/CD3+"] * d[col] // 1
+    counts.loc[:, col] = d["CD4+/CD3+"] * d[col]
 for col in cols.loc[cols["parent"] == "CD8+"].index:
-    counts.loc[:, col] = d["CD8+/CD3+"] * d[col] // 1
+    counts.loc[:, col] = d["CD8+/CD3+"] * d[col]
 for col in cols.loc[cols["parent"] == "CD45RA+_CD4+"].index:
-    counts.loc[:, col] = d["CD45RA+_CD4+/CD4+"] * d[col] // 1
+    counts.loc[:, col] = d["CD45RA+_CD4+/CD4+"] * d[col]
 for col in cols.loc[cols["parent"] == "CD45RO+_CD4+"].index:
-    counts.loc[:, col] = d["CD45RO+_CD4+/CD4+"] * d[col] // 1
+    counts.loc[:, col] = d["CD45RO+_CD4+/CD4+"] * d[col]
 for col in cols.loc[cols["parent"] == "CD45RA+_CD8+"].index:
-    counts.loc[:, col] = d["CD45RA+_CD8+/CD8+"] * d[col] // 1
+    counts.loc[:, col] = d["CD45RA+_CD8+/CD8+"] * d[col]
 for col in cols.loc[cols["parent"] == "CD45RO+_CD8+"].index:
-    counts.loc[:, col] = d["CD45RO+_CD8+/CD8+"] * d[col] // 1
+    counts.loc[:, col] = d["CD45RO+_CD8+/CD8+"] * d[col]
 for col in cols.loc[cols["parent"] == "CD185+"].index:
-    counts.loc[:, col] = d["CD185+/CD4+"] * d[col] // 1
+    counts.loc[:, col] = d["CD185+/CD4+"] * d[col]
 for col in cols.loc[cols["parent"] == "All_NK"].index:
-    counts.loc[:, col] = d["All_NK/LY"] * d[col] // 1
+    counts.loc[:, col] = d["All_NK/LY"] * d[col]
 for col in cols.loc[cols["parent"] == "CD56+_CD16_Br"].index:
-    counts.loc[:, col] = d["CD56+_CD16_Br/All_NK"] * d[col] // 1
+    counts.loc[:, col] = d["CD56+_CD16_Br/All_NK"] * d[col]
 for col in cols.loc[cols["parent"] == "CD19+_CD20+"].index:
-    counts.loc[:, col] = d["CD19+_CD20+/LY"] * d[col] // 1
+    counts.loc[:, col] = d["CD19+_CD20+/LY"] * d[col]
 
 assert ~counts.isnull().any().any()
 counts = counts.astype(int)
