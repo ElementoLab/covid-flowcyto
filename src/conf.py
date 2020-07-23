@@ -4,7 +4,7 @@
 """
 
 import json
-from typing import Union, TypedDict, List, Dict, Optional
+from typing import Union, TypedDict, List, Dict, Optional, Tuple
 
 import pandas as pd
 import numpy as np
@@ -22,6 +22,10 @@ class Model(TypedDict):
     categories: List[str]
     continuous: List[str]
     formula: Optional[str]
+
+
+class GatingStrategy(List[Tuple[str, int]]):
+    pass
 
 
 def minmax_scale(x):
@@ -128,6 +132,12 @@ specs = json.load(open("metadata/model_specifications.json", "r"))
 models: Dict[str, Model] = dict()
 for name, model in specs.items():
     models[name] = Model(**model)
+
+# Read up gating strategies
+specs = json.load(open("metadata/gating_strategies.single_cell.json", "r"))
+gating_strategies: Dict[str, GatingStrategy] = dict()
+for name, strat in specs.items():
+    gating_strategies[name] = GatingStrategy(strat)
 
 
 try:

@@ -4,11 +4,10 @@
 Prepare single cell data from FCS files in to H5ad format.
 """
 
-import re
+import struct
 
-import flowkit as fk
-from anndata import AnnData
-import scanpy as sc
+import flowkit as fk  # type: ignore
+from anndata import AnnData  # type: ignore
 
 from imc.operations import (
     get_best_mixture_number,
@@ -92,6 +91,63 @@ def get_population(
     return sel
 
 
+def gate_dataframe(
+    data,
+    gating_strategy,
+    start_with_singlet_gate: bool = True,
+    plot: bool = False,
+    output_img: Path = None,
+):
+    n_gates = len(gating_strategy)
+    if start_with_singlet_gate:
+        n_gates += 1
+        # # 1. Single cells, this is fixed for all
+        x = "FSC-H"
+        y = "FSC-A"
+        ratio = "FSC-H:FSC-A_ratio"
+        min_x = 50_000
+        max_x = 225_000
+        min_y = 80_000
+        max_y = 225_000
+        max_ratio = 2
+        data[ratio] = data[y] / data[x]
+        xdata = data.loc[
+            (data[x] > min_x)
+            & (data[x] < max_x)
+            & (data[y] > min_y)
+            & (data[y] < max_y)
+            & (data[ratio] < max_ratio)
+        ]
+    else:
+        xdata = data
+    if plot:
+        fig, axes = plt.subplots(1, n_gates, figsize=(n_gates * 4, 4))
+        axes = iter(axes)
+        if start_with_singlet_gate:
+            ax = next(axes)
+            kws = dict(s=2, alpha=0.1, rasterized=True)
+            ax.scatter(data[x], data[y], c="grey", **kws)
+            ax.scatter(xdata[x], xdata[y], c=xdata[ratio], cmap="RdBu_r", **kws)
+            ax.set(xlabel=x, ylabel=y)
+
+    # # 2+. Population-specific gates (includes viability)
+    for channel, population in gating_strategy:
+        sel = get_population(
+            xdata[channel],
+            population,
+            plot=plot,
+            ax=next(axes) if plot else None,
+        )
+        xdata = xdata.loc[sel]
+
+    if plot:
+        fig.axes[1].set_yscale("log")
+        fig.axes[2].set_yscale("log")
+        fig.savefig(output_img, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+    return xdata
+
+
 output_dir = Path("results") / "single_cell"
 output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -102,79 +158,57 @@ metadata_file = metadata_dir / "annotation.pq"
 meta = pd.read_parquet(metadata_file)
 
 
-plot_gating = False
+plot_gates = False
 overwrite = False
 n = 2000
 
-pos_gate_names = {
-    "WB_Memory": "CD3+",
-    "WB_IgG_IgM": "CD19+",
-    "WB_Checkpoint": "CD3+",
-    "WB_Treg": "CD3+",
-}
-pos_gate_channels = {
-    "WB_Memory": "CD3(FITC-A)",
-    "WB_IgG_IgM": "CD19(Pacific Blue-A)",
-    "WB_Checkpoint": "CD3(FITC-A)",
-    "WB_Treg": "sCD3(FITC-A)",
-}
-
 # Extract matrix, gate
-
-# panel = "WB_Memory"
-# panel = "WB_IgG_IgM"
-# sample_id = "S100"
-# plot_gating = True
-
 failures = list()
 
 # for panel in panels:
-for panel in pos_gate_names:
-    print(panel)
+for panel_name in gating_strategies:
+    print(panel_name)
     for sample_id in meta["sample_id"].unique():
         print(sample_id)
-        (output_dir / panel).mkdir(exist_ok=True, parents=True)
+        (output_dir / panel_name).mkdir(exist_ok=True, parents=True)
 
         sample_name = (
-            meta.loc[
-                meta["sample_id"] == sample_id, ["patient_code", "sample_id"]
+            meta.query(f"sample_id == '{sample_id}'")[
+                ["patient_code", "sample_id"]
             ]
             .drop_duplicates()
             .squeeze()
             .name
         )
-        output_file = output_dir / panel / f"{sample_name}.filtered.csv.gz"
-        output_file_subsampled = (
-            output_dir / panel / f"{sample_name}.filtered.subsampled.csv.gz"
-        )
-        output_figure = (
-            output_dir / panel / f"{sample_name}.filtering_gating.svg"
-        )
+        prefix = output_dir / panel_name / f"{sample_name}"
+        output_file = prefix + ".filtered.csv.gz"
+        output_file_subsampled = prefix + ".filtered.subsampled.csv.gz"
+        output_figure = prefix + ".filtering_gating.svg"
         if output_file.exists() and not overwrite:
             continue
 
-        # TODO: check for more files
         _id = int(sample_id.replace("S", ""))
         try:
-            fcs_file = sorted(list(fcs_dir.glob(f"{_id}_{panel}*.fcs")))[0]
+            fcs_file = sorted(list(fcs_dir.glob(f"{_id}_{panel_name}*.fcs")))[0]
             # this makes sure files with *(1) are read instead of potentially
             # corrupted ones from Cytobank
         except IndexError:
             try:
-                fff = list(fcs_dir.glob(f"{_id}x*_{panel}*.fcs"))
-                # assert len(fff) in [0, 1]
+                fff = list(fcs_dir.glob(f"{_id}x*_{panel_name}*.fcs"))
                 fcs_file = fff[0]
             except IndexError:
-                print(f"Sample {sample_id} is missing!")
-                failures.append((panel, sample_id))
+                print(f"Sample '{sample_id}' is missing!")
+                failures.append((panel_name, sample_id))
                 continue
 
         try:
             s = fk.Sample(fcs_file)
-            # some corrupted files will fail here but the correct one will be read after
+            # some corrupted files may fail here but the correct one will be read after
             # e.g. 195_WB_IgG_IgM
-        except:
-            failures.append((panel, sample_id))
+            # EDIT: with sorting files above, this should no longer be an issue
+        except struct.error:
+            print(f"Failed to open file for sample '{sample_id}!")
+            failures.append((panel_name, sample_id))
             continue
         ch_names = get_channel_labels(s)
         s.apply_compensation(s.metadata["spill"])
@@ -185,69 +219,18 @@ for panel in pos_gate_names:
             "asinh", param_t=10000, param_m=4.5, param_a=0
         )
         s.apply_transform(xform)
-        # x = pd.DataFrame(s.get_comp_events(), columns=ch_names)
         df = pd.DataFrame(s.get_transformed_events(), columns=ch_names)
         # convert time to seconds
         df["Time"] *= float(s.metadata["timestep"])
-
-        # save
         df.index.name = "cell"
-        # df.to_csv(output_dir / panel / f"{sample_name}.csv.gz")
-        # df.sample(n=n).to_csv(output_dir / panel / f"{sample_name}.sampled_{n}.csv.gz")
-
-        # # Observe dependency on time
-        # t = df['Time']
-        # plt.plot(t, t.index)
-        # plt.plot([t.min(), t.max()], [t.min(), t.max()])
-        # g = df.groupby(pd.cut(t, 100))[df.columns].mean().drop('Time', 1)
-        # _, axes = plt.subplots(len(g.columns))
-        # [ax.plot(g[z]) for ax, z in zip(axes, g.columns)]
 
         # Gate
-        # # 1. Single cells
-        name = "singlets"
-        x = "FSC-H"
-        y = "FSC-A"
-        ratio = "FSC-H:FSC-A_ratio"
-        min_x = 50_000
-        max_x = 225_000
-
-        min_y = 80_000
-        max_y = 225_000
-        max_ratio = 2
-        df[ratio] = df[y] / df[x]
-
-        xdf = df.loc[
-            (df[x] > min_x)
-            & (df[x] < max_x)
-            & (df[y] > min_y)
-            & (df[y] < max_y)
-            & (df[ratio] < max_ratio)
-        ]
-        if plot_gating:
-            fig, axes = plt.subplots(1, 3, figsize=(3 * 4, 4))
-            kws = dict(s=2, alpha=0.1, rasterized=True)
-            axes[0].scatter(df[x], df[y], c="grey", **kws)
-            axes[0].scatter(xdf[x], xdf[y], c=xdf[ratio], cmap="RdBu_r", **kws)
-            axes[0].set(xlabel=x, ylabel=y)
-
-        # # 2. Viable
-        name = "Viable"
-        x = "Viability(APC-R700-A)"
-        ax = axes[1] if plot_gating else None
-        sel = get_population(xdf[x], 0, plot=plot_gating, ax=ax)
-        xdf = xdf.loc[sel]
-
-        # # 3. Population-specific gate
-        # name = "CD3+"
-        # name = "CD19+"
-        name = pos_gate_names[panel]
-        # x = "CD3(FITC-A)"
-        # x = "CD19(Pacific Blue-A)"
-        x = pos_gate_channels[panel]
-        ax = axes[2] if plot_gating else None
-        sel = get_population(xdf[x], -1, plot=plot_gating, ax=ax)
-        xdf = xdf.loc[sel]
+        xdf = gate_dataframe(
+            df,
+            gating_strategy=gating_strategies[panel_name],
+            plot=plot_gates,
+            output_img=output_figure,
+        )
 
         # .iloc[:, 4:-2] <- to remove FSC, Time, etc cols
         xdf.to_csv(output_file)
@@ -256,25 +239,18 @@ for panel in pos_gate_names:
         except ValueError:
             xdf.to_csv(output_file_subsampled)
 
-        if plot_gating:
-            fig.axes[1].set_yscale("log")
-            fig.axes[2].set_yscale("log")
-            fig.savefig(output_figure, dpi=300, bbox_inches="tight")
-            plt.close(fig)
-
         print(f"Sample '{sample_id}' has {xdf.shape[0]} filtered cells.")
 
 
-# Concatenate
-
+# Concatenate and write H5ad files
 meta_m = meta.copy().drop(["other", "flow_comment"], axis=1)
 
 # # since h5ad cannot serialize datetime, let's convert to str
 for col in meta_m.columns[meta_m.dtypes == "datetime64[ns]"]:
     meta_m[col] = meta_m[col].astype(str)
 
-for panel in pos_gate_names:
-    panel_dir = output_dir / panel
+for panel_name in gating_strategies:
+    panel_dir = output_dir / panel_name
 
     for label, func in [("full", np.logical_not), ("subsampled", np.identity)]:
         df = pd.concat(
@@ -288,7 +264,7 @@ for panel in pos_gate_names:
         )
         cell = df.index
         df = df.reset_index(drop=True)
-        if panel == "WB_IgG_IgM":
+        if panel_name == "WB_IgG_IgM":
             # sample 'P060-S074-R01' has channel 'FITC-A' instead of 'sIgG(FITC-A)'
             df.loc[df["sIgG(FITC-A)"].isnull(), "sIgG(FITC-A)"] = df.loc[
                 df["sIgG(FITC-A)"].isnull(), "FITC-A"
@@ -306,7 +282,7 @@ for panel in pos_gate_names:
                 df["CD27(PerCP-Cy5-5-A)"].isnull(), "CD27(PerCP-Cy5-5-A)"
             ] = df.loc[df["CD27(PerCP-Cy5-5-A)"].isnull(), "PerCP-Cy5-5-A"]
             df = df.drop("PerCP-Cy5-5-A", axis=1)
-        if panel == "WB_Treg":
+        elif panel_name == "WB_Treg":
             # Channel BV605-A is empty
             df = df.drop("BV605-A", axis=1)
 
@@ -319,4 +295,4 @@ for panel in pos_gate_names:
         )
 
         a = AnnData(x, obs=df)
-        a.write_h5ad(panel_dir / f"{panel}.concatenated.{label}.h5ad")
+        a.write_h5ad(panel_dir / f"{panel_name}.concatenated.{label}.h5ad")

@@ -12,10 +12,7 @@ import pingouin as pg
 # from flowsom import flowsom
 # from minisom import MiniSom
 
-from imc.operations import (
-    get_best_mixture_number,
-    get_threshold_from_gaussian_mixture,
-)
+from imc.graphics import rasterize_scanpy
 
 from src.conf import *
 
@@ -30,23 +27,6 @@ metadata_file = metadata_dir / "annotation.pq"
 meta = pd.read_parquet(metadata_file)
 
 
-plot_gating = False
-overwrite = False
-n = 2000
-
-pos_gate_names = {
-    "WB_Memory": "CD3+",
-    "WB_IgG_IgM": "CD19+",
-    "WB_Checkpoint": "CD3+",
-    "WB_Treg": "CD3+",
-}
-pos_gate_channels = {
-    "WB_Memory": "CD3(FITC-A)",
-    "WB_IgG_IgM": "CD19(Pacific Blue-A)",
-    "WB_Checkpoint": "CD3(FITC-A)",
-    "WB_Treg": "sCD3(FITC-A)",
-}
-
 # Actually run analysis
 clin_vars = [
     "patient_code",
@@ -60,19 +40,21 @@ clin_vars = [
 # panel = "WB_IgG_IgM"
 # panel = "WB_Memory"
 # label = "subsampled"
-# label = "full"
+label = "full"
 
-for panel in pos_gate_names:
-    panel_dir = output_dir / panel
-    processed_h5ad = panel_dir / f"{panel}.concatenated.{label}.processed.h5ad"
+for panel_name in gating_strategies:
+    panel_dir = output_dir / panel_name
+    processed_h5ad = (
+        panel_dir / f"{panel_name}.concatenated.{label}.processed.h5ad"
+    )
     processed_h5ad_combat = (
-        panel_dir / f"{panel}.concatenated.{label}.processed.combat.h5ad"
+        panel_dir / f"{panel_name}.concatenated.{label}.processed.combat.h5ad"
     )
 
-    prefix = output_dir / f"{panel}.{label}."
+    prefix = output_dir / f"{panel_name}.{label}."
 
     if not processed_h5ad_combat.exists():
-        a = sc.read_h5ad(panel_dir / f"{panel}.concatenated.{label}.h5ad")
+        a = sc.read_h5ad(panel_dir / f"{panel_name}.concatenated.{label}.h5ad")
         if a.to_df().isnull().any().sum() != 0:
             a = a[~a.to_df().isnull().any(1), :].copy()
 
@@ -88,9 +70,9 @@ for panel in pos_gate_names:
             x = a[:, a.var.index == cd45].X
             sns.distplot(x, ax=ax, label=cd45)
             a = a[x > 0][:, ~(a.var.index == cd45)].copy()
-        pos_name = pos_gate_names[panel]
-        x = a[:, a.var.index.str.contains(pos_name)].X
-        sns.distplot(x, ax=ax, label=pos_name)
+        for channel, pop in gating_strategies[panel_name]:
+            x = a[:, a.var.index.str.contains(channel)].X
+            sns.distplot(x, ax=ax, label=channel)
         ax.legend()
         fig.savefig(prefix + "distributions.svg", **figkws)
         plt.close(fig)
@@ -145,8 +127,6 @@ for panel in pos_gate_names:
     a = sc.read(processed_h5ad_combat)
     # randomize order prior to plotting
     a = a[a.to_df().iloc[:, 0].sample(frac=1).index, :]
-
-    from imc.graphics import rasterize_scanpy
 
     f = prefix + "pca.svg"
     if not f.exists():

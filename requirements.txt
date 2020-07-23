@@ -22,5 +22,6 @@ fastcluster
 anndata
 GPy
 git+git://github.com/SheffieldML/GPclust@9f746598f2e383db5a4e89ef3bfc0270451c7873#egg=GPclust
+pingouin
 
 git+git://github.com/ElementoLab/imc#egg=imc

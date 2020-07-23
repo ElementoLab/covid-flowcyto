@@ -1,0 +1,76 @@
+{
+    "WB_Memory": [
+        [
+            "Viability(APC-R700-A)",
+            0
+        ],
+        [
+            "CD3(FITC-A)",
+            -1
+        ]
+    ],
+    "WB_IgG_IgM": [
+        [
+            "Viability(APC-R700-A)",
+            0
+        ],
+        [
+            "CD19(Pacific Blue-A)",
+            -1
+        ]
+    ],
+    "WB_Checkpoint": [
+        [
+            "Viability(APC-R700-A)",
+            0
+        ],
+        [
+            "CD3(FITC-A)",
+            -1
+        ]
+    ],
+    "WB_Treg": [
+        [
+            "Viability(APC-R700-A)",
+            0
+        ],
+        [
+            "sCD3(FITC-A)",
+            -1
+        ]
+    ],
+    "WB_NK_KIR": [
+        [
+            "Viability(APC-R700-A)",
+            0
+        ],
+        [
+            "CD56(Pacific Blue-A)",
+            -1
+        ]
+    ],
+    "PBMC_MDSC": [
+        [
+            "Viability(APC-R700-A)",
+            0
+        ],
+        [
+            "CD16(BV605-A)",
+            -1
+        ]
+    ],
+    "WB_T3": [
+        [
+            "Viability(APC-R700-A)",
+            0
+        ],
+        [
+            "sCD3(PE-Cy7-A)",
+            -1
+        ],
+        [
+            "CD4(BV605-A)",
+            -1
+        ]
+    ]
+}
