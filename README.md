@@ -3,10 +3,11 @@
 
 ## Organization
 
-- [This CSV file](data/original/clinical_data.joint.20200710.csv) contains the original manually curated data
+- [This CSV file](data/original/clinical_data.joint.20200723.csv) contains the original manually curated data
 - The [metadata](metadata) directory contains parsed/further curated metadata
-- The [src](src) directory contains source code used to analyze the data
 - Raw data (e.g. CSV or FCS files) will be under the [data](data) directory.
+- The [src](src) directory contains source code used to analyze the data
+- A [Makefile](Makefile) is provided to allow easy execution of task blocks.
 - Outputs from the analysis will be present in a `results` directory, with subfolders pertaining to each part of the analysis described below.
 
 
@@ -23,7 +24,7 @@ Be sure to make the file read-only (e.g. `chmod 400 ~/.cytobank.auth.json`).
 
 To see all available steps type:
 ```bash
-$ make help
+make help
 ```
 ```
 Makefile for the covid-flowcyto package/project.
@@ -45,8 +46,8 @@ all             Run all analysis steps in order
 To reproduce analysis, simply do:
 
 ```bash
-$ make requirements
-$ make
+make requirements
+make
 ```
 
 ### Requirements
