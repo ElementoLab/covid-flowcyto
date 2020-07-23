@@ -26,7 +26,7 @@ To see all available steps type:
 $ make help
 ```
 ```
-Makefile for the covid-facs package/project.
+Makefile for the covid-flowcyto package/project.
 Available commands:
 help            Display help and quit
 requirements    Install software requirements with pip
@@ -62,8 +62,8 @@ It is recommended to compartimentalize the analysis software from the system's u
 Here's how to create one with the repository and installed requirements:
 
 ```bash
-git clone git@github.com:ElementoLab/covid-facs.git
-cd covid-facs
+git clone git@github.com:ElementoLab/covid-flowcyto.git
+cd covid-flowcyto
 virtualenv .venv
 source activate .venv/bin/activate
 pip install -r requirements.txt
