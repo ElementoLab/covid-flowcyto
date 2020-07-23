@@ -656,9 +656,9 @@ for model_name, model in {
 
 # Display all effects together
 reduction = "reduced"
+ks = dict(center=0, cmap="RdBu_r", robust=True, metric="correlation")
 
 # # First for all variables (no filtering)
-coefs = None
 for i, (model_name, model) in enumerate(list(models.items())):
     # break
     prefix = f"differential.{model_name}.{reduction}."
@@ -670,57 +670,18 @@ for i, (model_name, model) in enumerate(list(models.items())):
     for variable in model["continuous"]:
         _coefs[variable] = _coefs[variable] * (meta[variable].mean() / 2)
     _coefs.columns = _coefs.columns + "___" + model_name
-    if coefs is None:
+    _pvals = long_f["qval"].drop("Intercept", 1)
+    _pvals.columns = _pvals.columns + "___" + model_name
+    if i == 0:
         coefs = _coefs
+        pvals = _pvals
     else:
         coefs = coefs.join(_coefs)
+        pvals = pvals.join(_pvals)
 
-grid = sns.clustermap(
-    coefs.T.fillna(0),
-    cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
-    xticklabels=True,
-    yticklabels=True,
-    figsize=(18, 10),
-    **ks,
-)
-grid.savefig(
-    output_dir / "differential.all_models.coefficients.all_vars.clustermap.svg"
-)
-plt.close(grid.fig)
-
-
-# # reduce coefficients by mean if appearing in more than one model
-c = coefs.columns.to_series().str.split("___").apply(pd.Series)
-c.columns = ["var", "model"]
-
-coefs_red = coefs.T.groupby(c["var"]).mean().T
-
-grid = sns.clustermap(
-    coefs_red.fillna(0).T,
-    cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
-    # row_colors=lpvals.loc[:, cols],
-    xticklabels=True,
-    yticklabels=True,
-    figsize=(18, 10),  # figsize=(10, 8),
-    **ks,
-)
-grid.savefig(
-    output_dir
-    / "differential.all_models.coefficients_reduced.all_vars.clustermap.svg"
-)
-plt.close(grid.fig)
-
-
-coefs = None
-for i, (model_name, model) in enumerate(list(models.items())):
-    # break
-    prefix = f"differential.{model_name}.{reduction}."
-    res = pd.read_csv(
-        output_dir / f"differential.{model_name}.{reduction}.results.csv"
-    )
+    # stricter version
     res = res.loc[res["llf"] < np.inf]
     long_f = res.pivot_table(index="variable", columns="comparison")
-
     # drop columns with levels not estimated
     long_f = long_f.loc[
         :,
@@ -732,63 +693,84 @@ for i, (model_name, model) in enumerate(list(models.items())):
     for variable in model["continuous"]:
         _coefs[variable] = _coefs[variable] * (meta[variable].mean() / 2)
     _coefs.columns = _coefs.columns + "___" + model_name
-    if coefs is None:
-        coefs = _coefs
+    _pvals = long_f["qval"].drop("Intercept", 1)
+    _pvals.columns = _pvals.columns + "___" + model_name
+    if i == 0:
+        coefs_strict = _coefs
+        pvals_strict = _pvals
     else:
-        coefs = coefs.join(_coefs)
+        coefs_strict = coefs_strict.join(_coefs)
+        pvals_strict = pvals_strict.join(_pvals)
 
 
-# Expand
-for col in coefs.columns[
-    coefs.columns.str.startswith("severity_group[T.severe]")
-]:
-    factor, model = col.split("___")
-    x = "severity_group[T.mild]___" + model
-    name = "severity_group[T.severe/T.mild]___" + model
-    try:
-        coefs[name] = coefs[col] - coefs[x]
-        break
-    except KeyError:
-        pass
+# # Expand
+# for col in coefs.columns[
+#     coefs.columns.str.startswith("severity_group[T.severe]")
+# ]:
+#     factor, model = col.split("___")
+#     x = "severity_group[T.mild]___" + model
+#     name = "severity_group[T.severe/T.mild]___" + model
+#     try:
+#         coefs[name] = coefs[col] - coefs[x]
+#         break
+#     except KeyError:
+#         pass
 
 
-# # # Heatmap combining both change and significance
-# cols = ~coefs.columns.str.contains("|".join(TECHNICAL))
-grid = sns.clustermap(
-    coefs.T,
-    cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
-    xticklabels=True,
-    yticklabels=True,
-    figsize=(14, 10),
-    **ks,
-)
-grid.savefig(
-    output_dir
-    / "differential.all_models.coefficients.vars_reduced.clustermap.svg"
-)
-plt.close(grid.fig)
-
-
-# # reduce coefficients by mean if appearing in more than one model
+# # Make version with coefficients reduce by mean if appearing in more than one model
 c = coefs.columns.to_series().str.split("___").apply(pd.Series)
 c.columns = ["var", "model"]
-
 coefs_red = coefs.T.groupby(c["var"]).mean().T
 
-grid = sns.clustermap(
-    coefs_red.T,
+c = coefs_strict.columns.to_series().str.split("___").apply(pd.Series)
+c.columns = ["var", "model"]
+coefs_strict_red = coefs_strict.T.groupby(c["var"]).mean().T
+
+c = pvals.columns.to_series().str.split("___").apply(pd.Series)
+c.columns = ["var", "model"]
+pvals_red = (pvals < 0.05).T.groupby(c["var"]).any().T
+
+c = pvals_strict.columns.to_series().str.split("___").apply(pd.Series)
+c.columns = ["var", "model"]
+pvals_strict_red = (pvals_strict < 0.05).T.groupby(c["var"]).any().T
+
+
+# # Plot both versions
+prefix = output_dir / "differential.all_models.coefficients"
+k = dict(
     cbar_kws=dict(label="log2(Fold-change) " + r"($\beta$)"),
-    # row_colors=lpvals.loc[:, cols],
     xticklabels=True,
     yticklabels=True,
-    figsize=(10, 8),
-    **ks,
 )
-grid.savefig(
-    output_dir
-    / "differential.all_models.coefficients_reduced.vars_reduced.clustermap.svg"
-)
-plt.close(grid.fig)
+for co, p, label in [
+    (coefs, pvals < 0.05, "all_vars"),
+    (coefs_strict, pvals_strict < 0.05, "strict_vars"),
+    (coefs_red, pvals_red, "reduced.all_vars"),
+    (coefs_strict_red, pvals_strict_red, "reduced.strict_vars"),
+]:
+    print(co.isnull().sum().sum())
+    grid1 = sns.clustermap(co.fillna(0).T, figsize=(18, 10), **ks, **k)
+    grid1.savefig(prefix + f".{label}.clustermap.svg")
+    plt.close(grid1.fig)
+
+    # Plot version where insignificant changes are masked
+    grid2 = sns.clustermap(
+        co.fillna(0).T, figsize=(18, 10), mask=~p.T, **ks, **k
+    )
+    grid2.savefig(prefix + f".{label}.clustermap.sig_masked.svg")
+    plt.close(grid2.fig)
+
+    # plot only significance as mask, clustered as above
+    grid3 = sns.clustermap(
+        p.T,
+        row_linkage=grid1.dendrogram_row.linkage,
+        col_linkage=grid1.dendrogram_col.linkage,
+        figsize=(18, 10),
+        **k,
+        cmap="binary",
+    )
+    grid3.savefig(prefix + f".{label}.clustermap.sig_only.svg")
+    plt.close(grid3.fig)
 
 
 # Add lock file
