@@ -295,7 +295,16 @@ else:
 # Fix a few variables which are not percentage but ratios
 matrix.loc[:, matrix.max() > 105] /= 100
 
+# these are the ratios:
+"CD4+/CD8+"
+"CD45RA+_CD4+/CD45RO+_CD4+"
+"CD45RA+_CD8+/CD45RO+_CD8+"
 
+# however, there is one which has only one extreme value
+# in the future I should probably set that to NaN and impute it later
+"PMN-MDSC/All_CD45_(WBC)"
+
+# This variable here is just for internal QC
 matrix = matrix.drop("T+B+NK", axis=1)
 
 # Save

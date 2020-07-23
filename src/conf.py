@@ -8,6 +8,7 @@ from typing import Union, TypedDict, List, Dict, Optional
 
 import pandas as pd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
@@ -50,6 +51,11 @@ def text(x, y, s, ax=None, **kws):
 
 Series = Union[pd.Series]
 DataFrame = Union[pd.DataFrame]
+
+patches = (
+    matplotlib.collections.PatchCollection,
+    matplotlib.collections.PathCollection,
+)
 
 figkws = dict(dpi=300, bbox_inches="tight")
 
@@ -129,8 +135,8 @@ try:
     cols.index = matrix.columns
     parent_population = cols[1].rename("parent_population")
 
-    panel_variables = json.load(open(metadata_dir / "panel_variables.json"))
-    panel_variables = {x: k for k, v in panel_variables.items() for x in v}
+    panels = json.load(open(metadata_dir / "panel_variables.json"))
+    panel_variables = {x: k for k, v in panels.items() for x in v}
     panel = {col: panel_variables[col] for col in matrix.columns}
 
     variable_classes = (
@@ -148,7 +154,7 @@ try:
             .rename("Mean patient")
         )
     )
-except:
+except Exception:
     print(
         "Could not load metadata and data dataframes. "
         "They probably don't exist yet."
