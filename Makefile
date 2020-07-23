@@ -50,7 +50,9 @@ results/unsupervised/__done__: data/matrix_imputed.pq
 unsupervised: results/unsupervised/__done__  ## Run unsupervised analysis
 results/supervised/__done__: data/matrix_imputed.pq
 	$(info    Running supervised analysis)
-	python -u src/supervised.py
+	python -u src/supervised_fit_models.py
+	python -u src/supervised_plot_results.py
+	python -u src/supervised_plot_jointly.py
 supervised: results/supervised/__done__  ## Run supervised analysis
 results/temporal/__done__: data/fcs/__done__
 	$(info    Running single cell analysis)

@@ -123,6 +123,13 @@ TECHNICAL = ["processing_batch_categorical", "processing_batch_continuous"]
 VARIABLES = CATEGORIES + CONTINUOUS
 
 
+# Read up model specifications
+specs = json.load(open("metadata/model_specifications.json", "r"))
+models: Dict[str, Model] = dict()
+for name, model in specs.items():
+    models[name] = Model(**model)
+
+
 try:
     meta = pd.read_parquet(metadata_file)
     matrix = pd.read_parquet(matrix_imputed_file)

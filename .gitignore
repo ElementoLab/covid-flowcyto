@@ -1,6 +1,7 @@
 # project specific
 data/
 results/
+*.sh
 
 # ignore test files
 .tox
@@ -15,6 +16,7 @@ dist/
 
 
 # toy/experimental files
+*.xml
 *.xls
 *.xlsx
 *.txt
