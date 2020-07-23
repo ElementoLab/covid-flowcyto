@@ -56,7 +56,7 @@ models[model_name] = model
 
 # Model 3: look at changes in treatment
 categories = [
-    "severe",  # <- take only severe patients
+    "severe",  # <- this is a special one which simply selects for this group
     "sex",
     "tocilizumab",
 ]
@@ -97,21 +97,18 @@ for factor in f:
     )
     models[model_name] = model
 
-json.dump(models, open("metadata/model_specifications.json", "w"))
 
-# Model 5: look at temporal changes in severe patients
+# Model 5a: compare convalescent vs mild - major categorical factors + sex + age
 categories = [
-    "severe",  # <- take only severe patients
+    "negative_mild",  # <- this is a special one which simply selects for these groups
+    "severity_group",
     "sex",
-    "tocilizumab",
 ]
-continuous = ["age", "time_symptoms"]
-technical = [
-    # "processing_batch_continuous"
-]
+continuous = ["age"]
+technical = ["processing_batch_continuous"]
 variables = categories + continuous + technical
 formula = None
-model_name = "5-time"
+model_name = "5a-negative_mild"
 model = Model(
     covariates=variables,
     categories=categories,
@@ -119,3 +116,45 @@ model = Model(
     formula=formula,
 )
 models[model_name] = model
+
+
+# Model 5b: compare convalescent vs mild - major categorical factors + sex + age
+categories = [
+    "mild_convalescent",  # <- this is a special one which simply selects for these groups
+    "severity_group",
+    "sex",
+]
+continuous = ["age"]
+technical = ["processing_batch_continuous"]
+variables = categories + continuous + technical
+formula = None
+model_name = "5b-mild_convalescent"
+model = Model(
+    covariates=variables,
+    categories=categories,
+    continuous=continuous,
+    formula=formula,
+)
+models[model_name] = model
+
+
+# Model 6: look at temporal changes in patients
+categories = [
+    "mild_severe",  # <- this is a special one which simply selects for these groups
+    "sex",
+    "tocilizumab",
+]
+continuous = ["age", "time_symptoms"]
+technical = ["processing_batch_continuous"]
+variables = categories + continuous + technical
+formula = None
+model_name = "6-time_symptoms"
+model = Model(
+    covariates=variables,
+    categories=categories,
+    continuous=continuous,
+    formula=formula,
+)
+models[model_name] = model
+
+json.dump(models, open("metadata/model_specifications.json", "w"), indent=4)

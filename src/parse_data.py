@@ -3,6 +3,7 @@
 """
 """
 
+import itertools
 
 from sklearn.preprocessing import LabelEncoder
 
@@ -168,10 +169,6 @@ for col in meta.loc[:, meta.dtypes == "object"]:
     meta[col] = meta[col].str.strip()
 
 
-# add one column coding severity in order to quickly select samples in linear models
-meta = meta.join(pd.get_dummies(meta["severity_group"]).replace(0, np.nan))
-
-
 # Normal donors vs patients
 meta["patient"] = (
     (meta["severity_group"] != "negative")
@@ -220,6 +217,15 @@ for col in categories:
     meta[col] = pd.Categorical(
         meta[col], categories=categories[col], ordered=True
     )
+
+# add one column coding severity in order to quickly select samples in linear models
+meta = meta.join(pd.get_dummies(meta["severity_group"]).replace(0, np.nan))
+
+# add one column to quickly select combinations in linear models
+cats = meta["severity_group"].cat.categories.drop("non-covid")
+for cat1, cat2 in itertools.combinations(cats, 2):
+    meta.loc[meta["severity_group"].isin([cat1, cat2]), cat1 + "_" + cat2] = 1.0
+
 
 # add batch from FCS files metadata
 batch_dates_file = metadata_dir / "facs_dates.reduced.csv"

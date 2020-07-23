@@ -123,5 +123,61 @@
         ],
         "continuous": [],
         "formula": "~ sex * tocilizumab"
+    },
+    "5a-negative_mild": {
+        "covariates": [
+            "negative_mild",
+            "severity_group",
+            "sex",
+            "age",
+            "processing_batch_continuous"
+        ],
+        "categories": [
+            "negative_mild",
+            "severity_group",
+            "sex"
+        ],
+        "continuous": [
+            "age"
+        ],
+        "formula": null
+    },
+    "5b-mild_convalescent": {
+        "covariates": [
+            "mild_convalescent",
+            "severity_group",
+            "sex",
+            "age",
+            "processing_batch_continuous"
+        ],
+        "categories": [
+            "mild_convalescent",
+            "severity_group",
+            "sex"
+        ],
+        "continuous": [
+            "age"
+        ],
+        "formula": null
+    },
+    "6-time_symptoms": {
+        "covariates": [
+            "mild_severe",
+            "sex",
+            "tocilizumab",
+            "age",
+            "time_symptoms",
+            "processing_batch_continuous"
+        ],
+        "categories": [
+            "mild_severe",
+            "sex",
+            "tocilizumab"
+        ],
+        "continuous": [
+            "age",
+            "time_symptoms"
+        ],
+        "formula": null
     }
 }

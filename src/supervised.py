@@ -260,19 +260,15 @@ cols = matrix.columns.str.extract("(.*)/(.*)")
 cols.index = matrix.columns
 parent_population = cols[1].rename("parent_population")
 
-
-# Decide if it makes sense to use full matrix of with less variable redundancy
-MATRIX_TO_USE = matrix_red_var
-# in order to use the variable names in linear model, names must be cleaned up
-matrix_c = MATRIX_TO_USE.copy()
-
 # Decide if using all samples (including technical replicates or reduced version)
 # This is a reduced version, where replicates are averaged
 meta_reduced = meta.drop_duplicates(subset=["sample_id"]).sort_values(
     "sample_id"
 )
-matrix_c_reduced = (
-    matrix_c.groupby(meta["sample_id"]).mean().set_index(meta_reduced.index)
+matrix_reduced = (
+    matrix_red_var.groupby(meta["sample_id"])
+    .mean()
+    .set_index(meta_reduced.index)
 )
 
 
@@ -292,22 +288,28 @@ red_pat_median = pd.read_parquet(
     "data/matrix_imputed_reduced.red_pat_median.pq"
 )
 
-for model_name, model in models.items():
+for model_name, model in list(models.items())[:-3]:
     formula = model["formula"] if "formula" in model else None
 
-    ## m, d, label, fit_vars = (meta_reduced, matrix_c_reduced, "reduced", variables)
+    ## m, d, reduction, covariates = (meta_reduced, matrix_reduced, "reduced", model['covariates'])
     matrices = [
-        (meta, matrix_c, "original", model["covariates"]),
-        (meta_reduced, matrix_c_reduced, "reduced", model["covariates"]),
+        (meta, matrix_red_var, "original", model["covariates"]),
+        (meta_reduced, matrix_reduced, "reduced", model["covariates"]),
         (meta_red, red_pat_early, "reduced_early", model["covariates"],),
         (meta_red, red_pat_median, "reduced_median", model["covariates"],),
     ]
-    for m, d, label, fit_vars in matrices:
+    for m, d, reduction, covariates in matrices:
+        results_file = (
+            output_dir / f"differential.{model_name}.{reduction}.results.csv"
+        )
+        # if results_file.exists():
+        #     continue
+        print(model_name, reduction)
         d.columns = rename_forward(d.columns)
-        # data = zscore(d).join(m[fit_vars]).dropna()
-        data = d.join(m[fit_vars]).dropna()
+        # data = zscore(d).join(m[covariates]).dropna()
+        data = d.join(m[covariates]).dropna()
 
-        # remove unused levels
+        # remove unused levels, ensuring the 'lowest' is the one to compare to
         for cat in data.columns[data.dtypes == "category"]:
             data[cat] = data[cat].cat.remove_unused_categories()
 
@@ -315,17 +317,17 @@ for model_name, model in models.items():
         if u.any():
             print(f"'{', '.join(data.columns[u])}' have only one value.")
             print("Removing from model.")
-            fit_vars = [v for v in fit_vars if v not in data.columns[u]]
+            covariates = [v for v in covariates if v not in data.columns[u]]
             data = data.drop(data.columns[u], axis=1)
 
         # Keep record of exactly what was the input to the model:
-        data.sort_values(fit_vars).to_csv(
-            output_dir / f"model_X_matrix.{model_name}.{label}.csv"
+        data.sort_values(covariates).to_csv(
+            output_dir / f"model_X_matrix.{model_name}.{reduction}.csv"
         )
         _res = parmap.map(
             fit_model,
             d.columns,
-            covariates=fit_vars,
+            covariates=covariates,
             data=data,
             formula=formula,
             pm_pbar=True,
@@ -334,22 +336,21 @@ for model_name, model in models.items():
         res["qval"] = multipletests(res["pval"].fillna(1), method="fdr_bh")[1]
         res["log_pval"] = log_pvalues(res["pval"]).fillna(0)
         res["log_qval"] = log_pvalues(res["qval"]).fillna(0)
-        res.to_csv(
-            output_dir / f"differential.{model_name}.{label}.results.csv"
-        )
-        results[(model_name, label)] = res
+        res.to_csv(results_file)
+        results[(model_name, reduction)] = res
 
 
 # Compare models (original vs reduced data)
 from scipy.stats import pearsonr
 
-opts = [
+reducts = [
     ("original", "reduced"),
     ("reduced", "reduced_early"),
     ("reduced", "reduced_median"),
 ]
 
-for a, b in opts:
+k = dict(index_col=0)
+for a, b in reducts:
     fig, axes = plt.subplots(
         2,
         len(models),
@@ -358,8 +359,9 @@ for a, b in opts:
         # sharey="row",
     )
     for i, (model_name, _) in enumerate(models.items()):
-        x = results[(model_name, a)].drop("Intercept")
-        y = results[(model_name, b)].drop("Intercept")
+        prefix = output_dir / f"differential.{model_name}."
+        x = pd.read_csv(prefix + f"{a}.results.csv", **k).drop("Intercept")
+        y = pd.read_csv(prefix + f"{b}.results.csv", **k).drop("Intercept")
 
         assert (x.index == y.index).all()
         close = np.allclose(x["coef"], y["coef"])
@@ -411,14 +413,13 @@ for a, b in opts:
 # Plot outcomes
 # # In this case, I will use the stats from the models fitted on the largest
 # # sample sizes, *but plot* the data with one dot per patient
-meta_c, matrix_c, label = (meta_red, red_pat_median, "reduced")
+meta_c, matrix_c, reduction = (meta_red, red_pat_median, "reduced")
 per_panel = True
 
 for i, (model_name, model) in enumerate(list(models.items())):
-    # break
-    prefix = f"differential.{model_name}.{label}."
+    prefix = f"differential.{model_name}.{reduction}."
     res = pd.read_csv(
-        output_dir / f"differential.{model_name}.{label}.results.csv"
+        output_dir / f"differential.{model_name}.{reduction}.results.csv"
     )
     res = res.loc[res["llf"] < np.inf]
 
@@ -590,10 +591,10 @@ for model_name, model in {
     k: v for k, v in models.items() if "interaction" in k
 }.items():
     res = pd.read_csv(
-        output_dir / f"differential.{model_name}.{label}.results.csv",
+        output_dir / f"differential.{model_name}.{reduction}.results.csv",
         index_col=0,
     )
-    prefix = f"differential.{model_name}.{label}.interaction_sex."
+    prefix = f"differential.{model_name}.{reduction}.interaction_sex."
     r = res.sort_values("pval")
     r = r.loc[r.index.str.contains(":")]
     r = r.loc[r["coef"].abs() < 6]
@@ -654,14 +655,15 @@ for model_name, model in {
 
 
 # Display all effects together
+reduction = "reduced"
 
 # # First for all variables (no filtering)
 coefs = None
 for i, (model_name, model) in enumerate(list(models.items())):
     # break
-    prefix = f"differential.{model_name}.{label}."
+    prefix = f"differential.{model_name}.{reduction}."
     res = pd.read_csv(
-        output_dir / f"differential.{model_name}.{label}.results.csv"
+        output_dir / f"differential.{model_name}.{reduction}.results.csv"
     )
     long_f = res.pivot_table(index="variable", columns="comparison")
     _coefs = long_f["coef"].drop("Intercept", 1)
@@ -712,9 +714,9 @@ plt.close(grid.fig)
 coefs = None
 for i, (model_name, model) in enumerate(list(models.items())):
     # break
-    prefix = f"differential.{model_name}.{label}."
+    prefix = f"differential.{model_name}.{reduction}."
     res = pd.read_csv(
-        output_dir / f"differential.{model_name}.{label}.results.csv"
+        output_dir / f"differential.{model_name}.{reduction}.results.csv"
     )
     res = res.loc[res["llf"] < np.inf]
     long_f = res.pivot_table(index="variable", columns="comparison")
@@ -734,6 +736,21 @@ for i, (model_name, model) in enumerate(list(models.items())):
         coefs = _coefs
     else:
         coefs = coefs.join(_coefs)
+
+
+# Expand
+for col in coefs.columns[
+    coefs.columns.str.startswith("severity_group[T.severe]")
+]:
+    factor, model = col.split("___")
+    x = "severity_group[T.mild]___" + model
+    name = "severity_group[T.severe/T.mild]___" + model
+    try:
+        coefs[name] = coefs[col] - coefs[x]
+        break
+    except KeyError:
+        pass
+
 
 # # # Heatmap combining both change and significance
 # cols = ~coefs.columns.str.contains("|".join(TECHNICAL))
@@ -783,9 +800,9 @@ open(output_dir / "__done__", "w")
 # model_name = "categoricals"
 # cur_variables = categories + technical
 
-# m, d, label, fit_vars = (meta, matrix_c, "original", cur_variables)
-# # data = zscore(d).join(m[fit_vars]).dropna()
-# data = d.join(m[fit_vars]).dropna()
+# m, d, label, covariates = (meta, matrix_c, "original", cur_variables)
+# # data = zscore(d).join(m[covariates]).dropna()
+# data = d.join(m[covariates]).dropna()
 
 # base = "mild"
 # data["severity_group"] = data["severity_group"].cat.reorder_categories(
@@ -797,7 +814,7 @@ open(output_dir / "__done__", "w")
 # for col in tqdm(d.columns):
 #     # data[col] = data[col] / 100  # for logit or binomial
 
-#     formula = f"{col} ~ {' + '.join(fit_vars)}"
+#     formula = f"{col} ~ {' + '.join(covariates)}"
 #     # formula = f"{col} ~ severity_group"
 #     # md = smf.glm(formula, data)
 #     md = smf.glm(
@@ -879,6 +896,6 @@ open(output_dir / "__done__", "w")
 #     add_colorbar(im, axes[i])
 
 # fig.savefig(
-#     output_dir / f"differential.{label}.test_{category}.volcano.over_{base}.svg"
+#     output_dir / f"differential.{reduction}.test_{category}.volcano.over_{base}.svg"
 # )
 # plt.close(fig)
