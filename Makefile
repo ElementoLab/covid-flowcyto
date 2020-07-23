@@ -60,7 +60,8 @@ results/temporal/__done__: data/fcs/__done__
 temporal: results/temporal/__done__  ## Run temporal analysis
 results/single_cell/__done__: data/fcs/__done__
 	$(info    Running single cell analysis)
-	python -u src/single_cell.py
+	python -u src/single_cell_prepare.py
+	python -u src/single_cell_analysis.py
 single_cell: results/single_cell/__done__  ## Run single-cell analysis
 
 analysis: \

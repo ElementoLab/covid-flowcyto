@@ -13,9 +13,7 @@ models: Dict[str, Model] = dict()
 # Model 1: compare normals vs patients - major categorical factors + sex + age
 categories = ["sex", "COVID19"]  # "patient",
 continuous = ["age"]
-technical = [
-    "processing_batch_continuous"
-]  # "processing_batch_continuous", "processing_batch_categorical"
+technical = ["processing_batch_continuous"]
 variables = categories + continuous + technical
 formula = None
 model_name = "1-general"
@@ -139,6 +137,7 @@ models[model_name] = model
 
 
 # Model 6: look at temporal changes in patients
+# # This is just confirmatory of the same in model 2 but this time accounts for treatment
 categories = [
     "mild_severe",  # <- this is a special one which simply selects for these groups
     "sex",
