@@ -2,6 +2,8 @@
 
 
 NAME=$(shell basename `pwd`)
+DATE=$(shell date '+%Y%m%d-%H%M%S')
+$(shell mkdir -p log)
 
 help:  ## Display help and quit
 	@echo Makefile for the $(NAME) package/project.
@@ -13,40 +15,40 @@ help:  ## Display help and quit
 
 requirements:  ## Install software requirements with pip
 	$(info    Installing python requirements)
-	python -m pip install -r requirements.txt
+	python -m pip install -r requirements.txt 2>&1 | tee log/requirements.$(DATE).log
 
 
 # Get data as FCS files
 data/fcs/__done__:
-	python -u src/get_fcs.py
+	python -u src/get_fcs.py 2>&1 | tee log/get_fcs.$(DATE).log
 get_fcs: data/fcs/__done__   ## Download FCS files from Cytobank
 
 metadata/facs_dates.reduced.csv:
 	$(info    Parsing batch date out of FCS files)
-	python -u src/parse_batch.py
+	python -u src/parse_batch.py 2>&1 | tee log/parse_batch.$(DATE).log
 get_batch: metadata/facs_dates.reduced.csv  ## Parse processing date from FCS metadata
 
 
 # Metadata / data cleanup
 data/matrix.pq:
 	$(info    Parsing original data into metadata and matrix data)
-	python -u src/parse_data.py
+	python -u src/parse_data.py 2>&1 | tee log/parse_date.$(DATE).log
 parse: data/matrix.pq  ## Parse original data into metadata and matrix data
 
 data/matrix_imputed.pq: data/matrix.pq
 	$(info    Imputting any missing data)
-	python -u src/imputation.py
+	python -u src/imputation.py 2>&1 | tee log/imputation.$(DATE).log
 impute: data/matrix_imputed.pq  ## Imputation of missing FACS data
 
 # Analysis
 results/clinical/__done__: data/matrix.pq
 	$(info    Running clinical analysis)
-	python -u src/clinical.py
+	python -u src/clinical.py 2>&1 | tee log/clinical.$(DATE).log
 clinical: results/clinical/__done__  ## Run analysis of clinial data
 
 results/unsupervised/__done__: data/matrix_imputed.pq
 	$(info    Running unsupervised analysis)
-	python -u src/unsupervised.py
+	python -u src/unsupervised.py 2>&1 | tee log/unsupervised.$(DATE).log
 unsupervised: results/unsupervised/__done__  ## Run unsupervised analysis
 results/supervised/__done__: data/matrix_imputed.pq
 	$(info    Running supervised analysis)
@@ -60,7 +62,7 @@ results/temporal/__done__: data/fcs/__done__
 temporal: results/temporal/__done__  ## Run temporal analysis
 results/single_cell/__done__: data/fcs/__done__
 	$(info    Running single cell analysis)
-	python -u src/single_cell_prepare.py
+	python -u src/single_cell_prepare.py 2>&1 | tee log/single_cell_prepare.$(DATE).log
 	python -u src/single_cell_analysis.py
 single_cell: results/single_cell/__done__  ## Run single-cell analysis
 

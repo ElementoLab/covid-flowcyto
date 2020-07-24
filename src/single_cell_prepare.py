@@ -17,80 +17,6 @@ from imc.operations import (
 from src.conf import *
 
 
-def get_grid_dims(dims, nstart=None):
-    """
-    Given a number of `dims` subplots, choose optimal x/y dimentions of plotting
-    grid maximizing in order to be as square as posible and if not with more
-    columns than rows.
-    """
-    if nstart is None:
-        n = min(dims, 1 + int(np.ceil(np.sqrt(dims))))
-    else:
-        n = nstart
-    if (n * n) == dims:
-        m = n
-    else:
-        a = pd.Series(n * np.arange(1, n + 1)) / dims
-        m = a[a >= 1].index[0] + 1
-    assert n * m >= dims
-
-    if n * m % dims > 1:
-        try:
-            n, m = get_grid_dims(dims=dims, nstart=n - 1)
-        except IndexError:
-            pass
-    return n, m
-
-
-def get_channel_labels(sample):
-    names = pd.DataFrame([s.pns_labels, s.pnn_labels]).T
-    names[0] = names[0].str.replace(" .*", "").replace("Viablity", "Viability")
-    names[1] = names.apply(
-        lambda x: "(" + x[1] + ")" if x[0] != "" else x[1], 1
-    )
-    return names[0] + names[1]
-
-
-def get_population(
-    ser: pd.Series, population: int = -1, plot=False, ax=None, **kwargs
-) -> pd.Index:
-    # from imc.operations import get_best_mixture_number, get_threshold_from_gaussian_mixture
-
-    # xx = s[s > 0]
-    if population == -1:
-        operator = np.greater_equal
-    elif population == 0:
-        operator = np.less_equal
-    else:
-        raise ValueError("")
-
-    xx = ser + abs(ser.min())
-    done = False
-    while not done:
-        try:
-            n, y = get_best_mixture_number(xx, return_prediction=True, **kwargs)
-        except ValueError:  # "Number of labels is 1. Valid values are 2 to n_samples - 1 (inclusive)"
-            continue
-        done = True
-    done = False
-    while not done:
-        try:
-            thresh = get_threshold_from_gaussian_mixture(xx, n_components=n)
-        except AssertionError:
-            continue
-        done = True
-
-    sel = xx[operator(xx, thresh.iloc[population])].index
-
-    if plot:
-        ax = plt.gca() if ax is None else ax
-        sns.distplot(xx, kde=False, ax=ax)
-        sns.distplot(xx[sel], kde=False, ax=ax)
-        [ax.axvline(q, linestyle="--", color="grey") for q in thresh]
-        ax = None
-    return sel
-
-
 def gate_dataframe(
     data,
     gating_strategy,
@@ -148,6 +74,55 @@ def gate_dataframe(
     return xdata
 
 
+def get_population(
+    ser: pd.Series, population: int = -1, plot=False, ax=None, **kwargs
+) -> pd.Index:
+    # from imc.operations import get_best_mixture_number, get_threshold_from_gaussian_mixture
+
+    # xx = s[s > 0]
+    if population == -1:
+        operator = np.greater_equal
+    elif population == 0:
+        operator = np.less_equal
+    else:
+        raise ValueError("")
+
+    xx = ser + abs(ser.min())
+    done = False
+    while not done:
+        try:
+            n, y = get_best_mixture_number(xx, return_prediction=True, **kwargs)
+        except ValueError:  # "Number of labels is 1. Valid values are 2 to n_samples - 1 (inclusive)"
+            continue
+        done = True
+    done = False
+    while not done:
+        try:
+            thresh = get_threshold_from_gaussian_mixture(xx, n_components=n)
+        except AssertionError:
+            continue
+        done = True
+
+    sel = xx[operator(xx, thresh.iloc[population])].index
+
+    if plot:
+        ax = plt.gca() if ax is None else ax
+        sns.distplot(xx, kde=False, ax=ax)
+        sns.distplot(xx[sel], kde=False, ax=ax)
+        [ax.axvline(q, linestyle="--", color="grey") for q in thresh]
+        ax = None
+    return sel
+
+
+def get_channel_labels(sample):
+    names = pd.DataFrame([s.pns_labels, s.pnn_labels]).T
+    names[0] = names[0].str.replace(" .*", "").replace("Viablity", "Viability")
+    names[1] = names.apply(
+        lambda x: "(" + x[1] + ")" if x[0] != "" else x[1], 1
+    )
+    return names[0] + names[1]
+
+
 output_dir = Path("results") / "single_cell"
 output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -165,11 +140,10 @@ n = 2000
 # Extract matrix, gate
 failures = list()
 
-# for panel in panels:
+print("Reading and gating FCS files.")
 for panel_name in gating_strategies:
     print(panel_name)
     for sample_id in meta["sample_id"].unique():
-        print(sample_id)
         (output_dir / panel_name).mkdir(exist_ok=True, parents=True)
 
         sample_name = (
@@ -186,6 +160,7 @@ for panel_name in gating_strategies:
         output_figure = prefix + ".filtering_gating.svg"
         if output_file.exists() and not overwrite:
             continue
+        print(sample_id)
 
         _id = int(sample_id.replace("S", ""))
         try:
@@ -243,6 +218,7 @@ for panel_name in gating_strategies:
 
 
 # Concatenate and write H5ad files
+print("Concatenating and writing H5ad files.")
 meta_m = meta.copy().drop(["other", "flow_comment"], axis=1)
 
 # # since h5ad cannot serialize datetime, let's convert to str
@@ -253,6 +229,11 @@ for panel_name in gating_strategies:
     panel_dir = output_dir / panel_name
 
     for label, func in [("full", np.logical_not), ("subsampled", np.identity)]:
+        output_h5ad = panel_dir / f"{panel_name}.concatenated.{label}.h5ad"
+        if output_h5ad.exists():
+            continue
+        print(panel_name, label)
+
         df = pd.concat(
             [
                 pd.read_csv(f, index_col=0).assign(
@@ -295,4 +276,6 @@ for panel_name in gating_strategies:
         )
 
         a = AnnData(x, obs=df)
-        a.write_h5ad(panel_dir / f"{panel_name}.concatenated.{label}.h5ad")
+        a.write_h5ad(output_h5ad)
+
+print("Finished.")

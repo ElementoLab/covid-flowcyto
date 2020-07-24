@@ -10,7 +10,6 @@ requests>=2.21.0
 
 parmap
 fancyimpute
-statsmodels
 adjustText
 FlowKit
 MiniSOM

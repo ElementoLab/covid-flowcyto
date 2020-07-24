@@ -70,8 +70,8 @@ for panel_name in gating_strategies:
             x = a[:, a.var.index == cd45].X
             sns.distplot(x, ax=ax, label=cd45)
             a = a[x > 0][:, ~(a.var.index == cd45)].copy()
-        for channel, pop in gating_strategies[panel_name]:
-            x = a[:, a.var.index.str.contains(channel)].X
+        for channel, pop in gating_strategies[panel_name][1:]:
+            x = a[:, a.var.index.str.contains(channel, regex=False)].X
             sns.distplot(x, ax=ax, label=channel)
         ax.legend()
         fig.savefig(prefix + "distributions.svg", **figkws)
