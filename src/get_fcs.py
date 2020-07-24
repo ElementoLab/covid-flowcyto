@@ -67,6 +67,8 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         quit()
+    # this complication here is a workaround for the SCU cluster
+    # which ipython processes somehow don't finish correctly
     else:
         quit()
     finally:

@@ -21,9 +21,6 @@ import GPclust
 from src.conf import *
 
 
-gp_ti
-
-
 def gpy_fit_optimize(x, y, return_model: bool = False):
     if x.shape[0] != 1:
         x = x.reshape((x.size, 1))

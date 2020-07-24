@@ -4,6 +4,8 @@
 This script finds the processing date of each sample from the FCS metadata.
 """
 
+import struct
+
 import pandas as pd
 import flowkit as fk
 
@@ -16,6 +18,7 @@ meta = pd.read_parquet(metadata_file)
 fcs_dir = data_dir / "fcs"
 
 # Get processing date from FCS metadata
+print("Getting metadata from FCS files.")
 failures = list()
 dates = {panel: pd.Series(dtype="object") for panel in panels}
 for panel in panels:
@@ -36,7 +39,6 @@ for panel in panels:
             .name
         )
 
-        # TODO: check for more files
         _id = int(sample_id.replace("S", ""))
         try:
             files = sorted(list(fcs_dir.glob(f"{_id}*{panel}*.fcs")))
@@ -54,9 +56,10 @@ for panel in panels:
 
         try:
             s = fk.Sample(fcs_file)
+            # this shouldn't happen anymore as correupt files aren't selected anymore
         except KeyboardInterrupt:
             raise
-        except:
+        except struct.error:
             print(f"Sample {sample_id} failed parsing FCS file!")
             failures.append((panel, sample_id))
             continue
@@ -64,6 +67,7 @@ for panel in panels:
         dates[panel][sample_id] = s.metadata["date"]
 
 
+print("Concatenating and writing to disk.")
 dates_df = pd.DataFrame(dates).apply(pd.to_datetime)
 dates_df.index.name = "sample_id"
 dates_df.to_csv(metadata_dir / "facs_dates.csv")
@@ -73,3 +77,5 @@ max_dates = dates_df.apply(lambda x: x.value_counts().idxmax(), axis=1).rename(
     "processing_batch"
 )
 max_dates.to_csv(metadata_dir / "facs_dates.reduced.csv")
+
+print("Finished.")

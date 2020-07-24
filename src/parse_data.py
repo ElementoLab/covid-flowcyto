@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 
 """
+Parse and sanitize original acquired clinical metadata and flow cytometry data.
 """
 
 import itertools
-
-from sklearn.preprocessing import LabelEncoder
 
 from src.conf import *
 
@@ -13,6 +12,7 @@ from src.conf import *
 for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
     _dir.mkdir(exist_ok=True, parents=True)
 
+print("Reading in original data.")
 if ORIGINAL_FILE_NAME.endswith(".xlsx"):
     original = pd.read_excel(
         original_dir / ORIGINAL_FILE_NAME,
@@ -27,6 +27,7 @@ else:
     )
 
 # extract only metadata
+print("Parsing, sanitizing and typing metadata.")
 DATA_COLUMN_INDEX = original.columns.tolist().index(NAME_OF_FIRST_DATA_COLUMN)
 
 meta = original.iloc[:, :DATA_COLUMN_INDEX]
@@ -184,7 +185,7 @@ meta["COVID19"] = (
 
 
 # make ordered Categorical
-categories = {
+cats = {
     "patient": ["Control", "Patient"],
     "COVID19": ["False", "True"],
     "sex": ["Female", "Male"],
@@ -213,10 +214,8 @@ categories = {
     "pcr": ["False", "True"],
 }
 
-for col in categories:
-    meta[col] = pd.Categorical(
-        meta[col], categories=categories[col], ordered=True
-    )
+for col in cats:
+    meta[col] = pd.Categorical(meta[col], categories=cats[col], ordered=True)
 
 # add one column coding severity in order to quickly select samples in linear models
 meta = meta.join(pd.get_dummies(meta["severity_group"]).replace(0, np.nan))
@@ -269,7 +268,9 @@ meta.to_parquet(metadata_dir / "annotation.pq")
 # meta.to_hdf(metadata_dir / "annotation.h5", "metadata", format="table")
 
 
-# extract FACS values
+# extract Flow cytometry quantification
+print("Parsing, sanitizing and typing flow cytometry data.")
+
 matrix = original.iloc[:, DATA_COLUMN_INDEX:]
 matrix.index = meta.index
 matrix.columns.name = "cell_type"
@@ -322,3 +323,5 @@ matrix.sort_index(0).sort_index(1).to_parquet(data_dir / "matrix.pq")
 
 # Save version with both just for inspection/sharing
 meta.join(matrix).to_csv(data_dir / "metadata_and_matrix.csv")
+
+print("Finished.")
