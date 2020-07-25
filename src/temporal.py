@@ -190,313 +190,313 @@ fig.savefig(
 
 
 # Fit GPs
-x = np.log1p(minmax_scale(meta["time_symptoms"].dropna().sort_values()))  # type: ignore
-res = pd.concat(
-    [
-        gpy_fit_optimize(x.values, matrix.loc[x.index, pop].values).rename(pop)
-        for pop in matrix.columns
-    ],
-    axis=1,
-).T
-res["log_p_value"] = log_pvalues(res["p_value"])
-res.to_csv(output_dir / "gaussian_process.fit.csv")
-
-# # plot stats
-p = pd.DataFrame(
-    dict(x=np.log1p(res["mean_posterior_std"]), y=np.log1p(res["D"]))
+# # real time in days
+days = np.log1p(minmax_scale(meta["time_symptoms"].dropna().sort_values()))  # type: ignore
+# # Pseudotime
+gradient = pd.read_csv(
+    results_dir
+    / "unsupervised"
+    / "covid-facs.cell_type_abundances.SpectralEmbedding.gradient.csv",
+    index_col=0,
+    squeeze=True,
 )
-fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-ax.set(xlabel="log(Mean posterior std)", ylabel="log(D)")
-ax.scatter(p["x"], p["y"])
-q = p.query("(x > 0.75) | (y > 0.75)")
-texts = text(q["x"], q["y"], q.index, ax=ax)
-adjust_text(
-    texts, arrowprops=dict(arrowstyle="->", color="black"), ax=ax,
-)
-fig.savefig(output_dir / "gaussian_process.fit.svg", **figkws)
 
-# # plot examples
-fig, axis = plt.subplots(1, q.shape[0], figsize=(q.shape[0] * 3, 3))
-for i, pop in enumerate(q.index):
-    m, w = gpy_fit_optimize(
-        x.values, matrix.loc[x.index, pop].values, return_model=True
+for x, label, limit in [
+    (days, "", (0.75, 0.75)),
+    (gradient, "pseudotime.", (1.5, 3.0)),
+]:
+    xmin, ymin = limit
+    prefix = output_dir / f"gaussian_process.{label}"
+
+    res = pd.concat(
+        [
+            gpy_fit_optimize(x.values, matrix.loc[x.index, pop].values).rename(
+                pop
+            )
+            for pop in matrix.columns
+        ],
+        axis=1,
+    ).T
+    res["log_p_value"] = log_pvalues(res["p_value"])
+    res.index.name = "variable"
+    res.to_csv(prefix + "fit.csv")
+
+    # # plot stats
+    p = pd.DataFrame(
+        dict(x=np.log1p(res["mean_posterior_std"]), y=np.log1p(res["D"]))
     )
-
-    m.plot(ax=axis[i], legend=False)
-    a = w.plot_f(ax=axis[i], legend=False)
-    # a['dataplot'][0].set_color("#e8ab02")
-    a["gpmean"][0][0].set_color("#e8ab02")
-    a["gpconfidence"][0].set_color("#e8ab02")
-    axis[i].set(
-        ylabel=pop,
-        title=f"D: {res.loc[pop, 'D']:.2f}; p:{res.loc[pop, 'p_value']:.3f}; SD: {res.loc[pop, 'mean_posterior_std']:.2f}",
+    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+    ax.set(xlabel="log(Mean posterior std)", ylabel="log(D)")
+    ax.scatter(p["x"], p["y"])
+    q = p.query(f"(x > {xmin}) | (y > {ymin})")
+    texts = text(q["x"], q["y"], q.index, ax=ax)
+    adjust_text(
+        texts, arrowprops=dict(arrowstyle="->", color="black"), ax=ax,
     )
-for ax in axis:
-    ax.set_xlabel("Time since symptoms")
-fig.savefig(output_dir / "gaussian_process.top_variable.example.svg", **figkws)
+    fig.savefig(prefix + "fit.svg", **figkws)
 
+    # # plot examples
+    q = res.sort_values("p_value").head(20)
+    fig, axis = plt.subplots(1, q.shape[0], figsize=(q.shape[0] * 3, 3))
+    for i, pop in enumerate(q.index):
+        m, w = gpy_fit_optimize(
+            x.values, matrix.loc[x.index, pop].values, return_model=True
+        )
 
-# Now do the same for each patient independently
-_res = list()
+        m.plot(ax=axis[i], legend=False)
+        a = w.plot_f(ax=axis[i], legend=False)
+        # a['dataplot'][0].set_color("#e8ab02")
+        a["gpmean"][0][0].set_color("#e8ab02")
+        a["gpconfidence"][0].set_color("#e8ab02")
+        axis[i].set(
+            ylabel=pop,
+            title=f"D: {res.loc[pop, 'D']:.2e}; p:{res.loc[pop, 'p_value']:.2e}; SD: {res.loc[pop, 'mean_posterior_std']:.2f}",
+        )
+    for ax in axis:
+        ax.set_xlabel("Time since symptoms")
+    fig.savefig(prefix + "top_variable.example.svg", **figkws)
 
-for patient in tqdm(pts):
-    x = np.log1p(meta.loc[meta["patient_code"] == patient, "time_symptoms"])
-    _res.append(
-        pd.concat(
-            [
-                gpy_fit_optimize(
-                    x.values, matrix.loc[x.index, pop].values
-                ).rename(pop)
-                for pop in matrix.columns
-            ],
-            axis=1,
-        ).T.assign(patient=patient)
+    # Now do the same for each patient independently
+    _res = list()
+    for patient in tqdm(pts):
+        x2 = x.loc[x.index.str.contains(patient)]
+        _res.append(
+            pd.concat(
+                [
+                    gpy_fit_optimize(
+                        x2.values, matrix.loc[x2.index, pop].values
+                    ).rename(pop)
+                    for pop in matrix.columns
+                ],
+                axis=1,
+            ).T.assign(patient=patient)
+        )
+    res = pd.concat(_res).rename_axis(index="population")
+    res.to_csv(prefix + "per_patient.fit.csv")
+
+    res = pd.read_csv(prefix + "per_patient.fit.csv", index_col=0)
+
+    res["direction"] = res["RBF"] > 0
+
+    res_mean = res.groupby(level=0).mean()
+    res["sig"] = res["p_value"] < 0.05
+    res_sum = res.groupby(level=0)["sig"].sum()
+
+    # # plot stats
+    p = pd.DataFrame(
+        dict(
+            x=np.log1p(res_mean["mean_posterior_std"]),
+            y=np.log1p(res_mean["D"]),
+        )
     )
-res = pd.concat(_res).rename_axis(index="population")
-res.to_csv(output_dir / "gaussian_process.per_patient.fit.csv")
-
-
-res = pd.read_csv(
-    output_dir / "gaussian_process.per_patient.fit.csv", index_col=0
-)
-
-
-res["direction"] = res["RBF"] > 0
-
-
-res_mean = res.groupby(level=0).mean()
-res["sig"] = res["p_value"] < 0.05
-res_sum = res.groupby(level=0)["sig"].sum()
-
-# # plot stats
-p = pd.DataFrame(
-    dict(x=np.log1p(res_mean["mean_posterior_std"]), y=np.log1p(res_mean["D"]))
-)
-fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-ax.set(xlabel="Mean posterior std", ylabel="D")
-ax.scatter(p["x"], p["y"])
-q = p.query("(x > 1.0) | (y > 0.5)")
-texts = text(q["x"], q["y"], q.index, ax=ax)
-adjust_text(
-    texts, arrowprops=dict(arrowstyle="->", color="black"), ax=ax,
-)
-fig.savefig(
-    output_dir / "gaussian_process.per_patient.aggregated.fit.svg", **figkws
-)
-
-#
-n_top = 40
-n_rows = int(np.ceil(n_top / 5))
-
-fig, axes = plt.subplots(n_rows, 5, figsize=(5 * 3 * 2, n_rows * 3))
-
-for i, (patient, pop) in (
-    res.sort_values("D")
-    .dropna()
-    .tail(n_top)
-    .reset_index()[["patient", "population"]]
-    .iterrows()
-):
-    # patient = "P016"
-    # pop = "IgM+/LY"
-    x = np.log1p(meta.loc[meta["patient_code"] == patient, "time_symptoms"])
-    m, w = gpy_fit_optimize(
-        x.values, matrix.loc[x.index, pop].values, return_model=True
+    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+    ax.set(xlabel="Mean posterior std", ylabel="D")
+    ax.scatter(p["x"], p["y"])
+    q = p.query("(x > 1.0) | (y > 0.5)")
+    texts = text(q["x"], q["y"], q.index, ax=ax)
+    adjust_text(
+        texts, arrowprops=dict(arrowstyle="->", color="black"), ax=ax,
     )
-    m.plot(ax=axes.flat[i], legend=False)
-    a = w.plot_f(ax=axes.flat[i], legend=False)
-    # a['dataplot'][0].set_color("#e8ab02")
-    a["gpmean"][0][0].set_color("#e8ab02")
-    a["gpconfidence"][0].set_color("#e8ab02")
-    p = res.query(f"patient == '{patient}'")
-    axes.flat[i].set(
-        ylabel=pop,
-        title=f"{patient}; D: {p.loc[pop, 'D']:.2f}; p:{p.loc[pop, 'p_value']:.3f}; SD: {p.loc[pop, 'mean_posterior_std']:.2f}",
-    )
-for ax in axes.flat:
-    ax.set_xlabel("Time since symptoms")
-fig.savefig(
-    output_dir / "gaussian_process.per_patient.top_variable.example.svg",
-    **figkws,
-)
-plt.close(fig)
+    fig.savefig(prefix + "per_patient.aggregated.fit.svg", **figkws)
 
+    #
+    n_top = 40
+    n_rows = int(np.ceil(n_top / 5))
 
-# try to summarize metrics across patients somehow
-v = (res["p_value"] < 0.1).groupby(res.index).sum().sort_values() / res[
-    "patient"
-].nunique()
-m = res["D"].groupby(res.index).sum().sort_values()
+    fig, axes = plt.subplots(n_rows, 5, figsize=(5 * 3 * 2, n_rows * 3))
 
-
-# # Focus on one patient
-for pat in res["patient"].unique():
-    figure = (
-        output_dir / f"gaussian_process.patient_{pat}.top_variable.example.svg"
-    )
-    if figure.exists():
-        continue
-    r = res.query(f"patient == '{pat}'")
-    n_top = r.shape[0]
-    n_rows = int(np.ceil(n_top / 8))
-    fig, axes = plt.subplots(n_rows, 8, figsize=(8 * 3 * 2, n_rows * 3))
     for i, (patient, pop) in (
-        r.dropna()  # .sort_values("D")
+        res.sort_values("D")
+        .dropna()
         .tail(n_top)
         .reset_index()[["patient", "population"]]
         .iterrows()
     ):
-        x = np.log1p(meta.loc[meta["patient_code"] == patient, "time_symptoms"])
+        # patient = "P016"
+        # pop = "IgM+/LY"
+        x2 = x.loc[x.index.str.contains(patient)]
         m, w = gpy_fit_optimize(
-            x.values, matrix.loc[x.index, pop].values, return_model=True
+            x2.values, matrix.loc[x2.index, pop].values, return_model=True
         )
         m.plot(ax=axes.flat[i], legend=False)
         a = w.plot_f(ax=axes.flat[i], legend=False)
         # a['dataplot'][0].set_color("#e8ab02")
         a["gpmean"][0][0].set_color("#e8ab02")
         a["gpconfidence"][0].set_color("#e8ab02")
+        p = res.query(f"patient == '{patient}'")
         axes.flat[i].set(
             ylabel=pop,
-            title=f"{patient}; D: {r.loc[pop, 'D']:.2f}; p:{r.loc[pop, 'p_value']:.3f}; SD: {r.loc[pop, 'mean_posterior_std']:.2f}",
+            title=f"{patient}; D: {p.loc[pop, 'D']:.2e}; p:{p.loc[pop, 'p_value']:.3e}; SD: {p.loc[pop, 'mean_posterior_std']:.2f}",
         )
     for ax in axes.flat:
         ax.set_xlabel("Time since symptoms")
     fig.savefig(
-        figure, **figkws,
+        prefix + "per_patient.top_variable.example.svg", **figkws,
     )
     plt.close(fig)
 
+    # try to summarize metrics across patients somehow
+    v = (res["p_value"] < 0.1).groupby(res.index).sum().sort_values() / res[
+        "patient"
+    ].nunique()
+    m = res["D"].groupby(res.index).sum().sort_values()
 
-#
+    # # Focus on one patient
+    for pat in res["patient"].unique():
+        figure = prefix + f"patient_{pat}.top_variable.example.svg"
+        if figure.exists():
+            continue
+        r = res.query(f"patient == '{pat}'")
+        n_top = r.shape[0]
+        n_rows = int(np.ceil(n_top / 8))
+        fig, axes = plt.subplots(n_rows, 8, figsize=(8 * 3 * 2, n_rows * 3))
+        for i, (patient, pop) in (
+            r.dropna()  # .sort_values("D")
+            .tail(n_top)
+            .reset_index()[["patient", "population"]]
+            .iterrows()
+        ):
+            x2 = x.loc[x.index.str.contains(patient)]
+            m, w = gpy_fit_optimize(
+                x2.values, matrix.loc[x2.index, pop].values, return_model=True
+            )
+            m.plot(ax=axes.flat[i], legend=False)
+            a = w.plot_f(ax=axes.flat[i], legend=False)
+            # a['dataplot'][0].set_color("#e8ab02")
+            a["gpmean"][0][0].set_color("#e8ab02")
+            a["gpconfidence"][0].set_color("#e8ab02")
+            axes.flat[i].set(
+                ylabel=pop,
+                title=f"{patient}; D: {r.loc[pop, 'D']:.2f}; p:{r.loc[pop, 'p_value']:.3f}; SD: {r.loc[pop, 'mean_posterior_std']:.2f}",
+            )
+        for ax in axes.flat:
+            ax.set_xlabel("Time since symptoms")
+        fig.savefig(
+            figure, **figkws,
+        )
+        plt.close(fig)
 
+    #
 
-#
+    #
 
+    #
 
-#
+    #
 
+    # Try to cluster cell types based on temporal behaviour using a MOHGP
+    Y = zscore(matrix.loc[x.index])
+    model = fit_MOHGP(x.values.reshape((-1, 1)), Y.values, 6)
 
-#
+    print("Plotting cluster posteriors.")
+    # Plot clusters
+    fig = plt.figure()
+    model.plot(
+        newfig=False,
+        on_subplots=True,
+        colour=True,
+        in_a_row=False,
+        joined=False,
+        errorbars=False,
+    )
+    for ax in fig.axes:
+        ax.set_rasterized(True)
+        ax.set_ylabel("Population abundance")
+        ax.set_xlabel("Time (log2)")
+    fig.savefig(prefix + "mohgp.fitted_model.clusters.svg", **figkws)
 
-# Try to cluster cell types based on temporal behaviour using a MOHGP
-Y = zscore(matrix.loc[x.index])
-model = fit_MOHGP(x.values.reshape((-1, 1)), Y.values)
+    print("Plotting parameters/probabilities.")
+    # Posterior parameters
+    fig, axis = plt.subplots(
+        2,
+        1,
+        gridspec_kw={"height_ratios": [12, 1]},
+        figsize=(3 * 4, 1 * 4),
+        tight_layout=True,
+    )
+    mat = axis[0].imshow(
+        model.phi.T, cmap=plt.get_cmap("hot"), vmin=0, vmax=1, aspect="auto"
+    )
+    axis[0].set_xlabel("Region index")
+    axis[0].set_ylabel("Cluster index")
+    axis[1].set_aspect(0.1)
+    plt.colorbar(
+        mat,
+        cax=axis[1],
+        label="Posterior probability",
+        orientation="horizontal",
+    )
+    fig.savefig(
+        prefix + "mohgp.fitted_model.posterior_probs.svg", **figkws,
+    )
 
+    # Assignment probabilities
+    g = sns.clustermap(
+        model.phi.T,
+        cmap=plt.get_cmap("hot"),
+        vmin=0,
+        vmax=1,
+        xticklabels=False,
+        rasterized=True,
+        figsize=(3, 0.2 * model.phi.T.shape[0]),
+        cbar_kws={"label": "Posterior probability"},
+    )
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
+    g.savefig(
+        prefix + "mohgp.fitted_model.posterior_probs.clustermap.svg", **figkws,
+    )
 
-print("Plotting cluster posteriors.")
-# Plot clusters
-fig = plt.figure()
-model.plot(
-    newfig=False,
-    on_subplots=True,
-    colour=True,
-    in_a_row=False,
-    joined=False,
-    errorbars=False,
-)
-for ax in fig.axes:
-    ax.set_rasterized(True)
-    ax.set_ylabel("Population abundance")
-    ax.set_xlabel("Time (log2)")
-fig.savefig(
-    output_dir / "gaussian_process.mohgp.fitted_model.clusters.svg", **figkws
-)
+    # Clustermap with cluster assignments
+    print("Plotting clusters.")
+    tp = pd.Series(
+        matrix.columns.get_level_values("timepoint")
+        .str.replace("d", "")
+        .astype(int),
+        index=matrix.columns,
+    ).sort_values()
 
-print("Plotting parameters/probabilities.")
-# Posterior parameters
-fig, axis = plt.subplots(
-    2,
-    1,
-    gridspec_kw={"height_ratios": [12, 1]},
-    figsize=(3 * 4, 1 * 4),
-    tight_layout=True,
-)
-mat = axis[0].imshow(
-    model.phi.T, cmap=plt.get_cmap("hot"), vmin=0, vmax=1, aspect="auto"
-)
-axis[0].set_xlabel("Region index")
-axis[0].set_ylabel("Cluster index")
-axis[1].set_aspect(0.1)
-plt.colorbar(
-    mat, cax=axis[1], label="Posterior probability", orientation="horizontal"
-)
-fig.savefig(
-    output_dir / "gaussian_process.mohgp.fitted_model.posterior_probs.svg",
-    **figkws,
-)
+    g2 = sns.clustermap(
+        matrix.loc[x.index],
+        col_colors=[plt.get_cmap("Paired")(i) for i in np.argmax(model.phi, 1)],
+        row_cluster=False,
+        col_cluster=True,
+        z_score=1,
+        xticklabels=False,
+        rasterized=True,
+        figsize=(8, 0.2 * matrix.shape[1]),
+        metric="correlation",
+        robust=True,
+    )
+    g2.ax_heatmap.set_xticklabels(
+        g2.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small"
+    )
+    g2.ax_heatmap.set_yticklabels(g2.ax_heatmap.get_yticklabels(), rotation=0)
+    g2.ax_col_dendrogram.set_rasterized(True)
+    g2.savefig(
+        prefix + "mohgp.fitted_model.clustermap.cluster_labels.svg", **figkws,
+    )
 
-# Assignment probabilities
-g = sns.clustermap(
-    model.phi.T,
-    cmap=plt.get_cmap("hot"),
-    vmin=0,
-    vmax=1,
-    xticklabels=False,
-    rasterized=True,
-    figsize=(3, 0.2 * model.phi.T.shape[0]),
-    cbar_kws={"label": "Posterior probability"},
-)
-g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0)
-g.savefig(
-    output_dir
-    / "gaussian_process.mohgp.fitted_model.posterior_probs.clustermap.svg",
-    **figkws,
-)
-
-# Clustermap with cluster assignments
-print("Plotting clusters.")
-tp = pd.Series(
-    matrix.columns.get_level_values("timepoint")
-    .str.replace("d", "")
-    .astype(int),
-    index=matrix.columns,
-).sort_values()
-
-g2 = sns.clustermap(
-    matrix.loc[x.index],
-    col_colors=[plt.get_cmap("Paired")(i) for i in np.argmax(model.phi, 1)],
-    row_cluster=False,
-    col_cluster=True,
-    z_score=1,
-    xticklabels=False,
-    rasterized=True,
-    figsize=(8, 0.2 * matrix.shape[1]),
-    metric="correlation",
-    robust=True,
-)
-g2.ax_heatmap.set_xticklabels(
-    g2.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small"
-)
-g2.ax_heatmap.set_yticklabels(g2.ax_heatmap.get_yticklabels(), rotation=0)
-g2.ax_col_dendrogram.set_rasterized(True)
-g2.savefig(
-    output_dir
-    / "gaussian_process.mohgp.fitted_model.clustermap.cluster_labels.svg",
-    **figkws,
-)
-
-matrix_mean = matrix.loc[x.index].groupby(x).mean()
-g3 = sns.clustermap(
-    matrix_mean,
-    col_colors=[plt.get_cmap("Paired")(i) for i in np.argmax(model.phi, 1)],
-    row_cluster=False,
-    col_cluster=True,
-    z_score=1,
-    xticklabels=False,
-    yticklabels=True,
-    rasterized=True,
-    figsize=(8, 0.2 * matrix_mean.shape[0]),
-    metric="correlation",
-    robust=True,
-)
-g3.ax_heatmap.set_xticklabels(
-    g3.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small"
-)
-g3.ax_heatmap.set_yticklabels(g3.ax_heatmap.get_yticklabels(), rotation=0)
-g3.ax_col_dendrogram.set_rasterized(True)
-g3.savefig(
-    output_dir
-    / "gaussian_process.mohgp.fitted_model.mean_acc.clustermap.cluster_labels.svg",
-    **figkws,
-)
+    matrix_mean = matrix.loc[x.index].groupby(x).mean()
+    g3 = sns.clustermap(
+        matrix_mean,
+        col_colors=[plt.get_cmap("Paired")(i) for i in np.argmax(model.phi, 1)],
+        row_cluster=False,
+        col_cluster=True,
+        z_score=1,
+        xticklabels=False,
+        yticklabels=True,
+        rasterized=True,
+        figsize=(8, 0.2 * matrix_mean.shape[0]),
+        metric="correlation",
+        robust=True,
+    )
+    g3.ax_heatmap.set_xticklabels(
+        g3.ax_heatmap.get_xticklabels(), rotation=90, fontsize="xx-small"
+    )
+    g3.ax_heatmap.set_yticklabels(g3.ax_heatmap.get_yticklabels(), rotation=0)
+    g3.ax_col_dendrogram.set_rasterized(True)
+    g3.savefig(
+        prefix + "mohgp.fitted_model.mean_acc.clustermap.cluster_labels.svg",
+        **figkws,
+    )
