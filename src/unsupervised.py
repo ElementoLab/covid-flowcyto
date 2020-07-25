@@ -1,20 +1,15 @@
 #!/usr/bin/env python
 
 """
+Use unsupervised methods to visualize the data and discover patterns.
 """
 
-import json
 import re
 
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.preprocessing import LabelEncoder
-from sklearn.decomposition import PCA, NMF
-from sklearn.manifold import MDS, TSNE
-from umap import UMAP
+from sklearn.decomposition import PCA, NMF  # type: ignore
+from sklearn.manifold import MDS, TSNE, Isomap, SpectralEmbedding  # type: ignore
+from umap import UMAP  # type: ignore
 
-import imc  # this import is here to allow automatic colorbars in clustermap
 from imc.graphics import to_color_series
 
 from src.conf import *
@@ -141,17 +136,9 @@ for cat_var in categories:
         # grid.map_dataframe(sns.stripplot, y="value", x=category, hue=category, data=data, palette='tab10')
 
         for ax in grid.axes.flat:
-            [
-                x.set_alpha(0.25)
-                for x in ax.get_children()
-                if isinstance(
-                    x,
-                    (
-                        matplotlib.collections.PatchCollection,
-                        matplotlib.collections.PathCollection,
-                    ),
-                )
-            ]
+            for x in ax.get_children():
+                if isinstance(x, patches):
+                    x.set_alpha(0.25)
         grid.map_dataframe(sns.swarmplot, **kws)
 
         for ax in grid.axes.flat:
@@ -344,7 +331,7 @@ for df, label1 in [(matrix, "full"), (matrix_red_var, "reduced")]:
 
 # highly variable variables
 
-# # variant stabilization
+# # variance stabilization
 
 # # clustermaps
 
@@ -367,18 +354,22 @@ for mat, met, label1 in [
     (matrix_red_var_red_pat_early, meta_red, "red_pat_early"),
     (matrix_red_var_red_pat_median, meta_red, "red_pat_median"),
 ]:
-    for model, kwargs in [
-        (PCA, dict()),
-        (NMF, dict()),
-        (MDS, dict(n_dims=1)),
-        (TSNE, dict(n_dims=1)),
-        (UMAP, dict(n_dims=1)),
+    # mat, met, label1 = (matrix_red_var, meta, "original")
+    for model, pkwargs, mkwargs in [
+        (PCA, dict(), dict()),
+        (NMF, dict(), dict()),
+        (MDS, dict(n_dims=1), dict()),
+        (TSNE, dict(n_dims=1), dict()),
+        (Isomap, dict(n_dims=1), dict()),
+        (SpectralEmbedding, dict(n_dims=1), dict()),
+        (UMAP, dict(n_dims=1), dict(random_state=0)),
     ][::-1]:
         name = str(model).split(".")[-1].split("'")[0]
-        model_inst = model()
+        model_inst = model(**mkwargs)
 
         # manifolds[name] = dict()
         for df, label2 in [(mat, "percentages"), (zscore(mat), "zscore")]:
+            # df, label2 = (mat, "percentages")
             try:  #  this will occur for example in NMF with Z-score transform
                 res = pd.DataFrame(model_inst.fit_transform(df), index=df.index)
             except ValueError:
@@ -389,7 +380,7 @@ for mat, met, label1 in [
                 met,
                 cols=sample_variables.columns,
                 algo_name=name,
-                **kwargs,
+                **pkwargs,
             )
             fig.savefig(
                 output_dir
@@ -399,6 +390,117 @@ for mat, met, label1 in [
             plt.close(fig)
 
         # manifolds[name][label1 + " - " + label2] = res
+
+
+# Plot arrows between samples of individual patients
+name, df, label1, label2 = (
+    "SpectralEmbedding",
+    zscore(matrix),
+    "original",
+    "zscore",
+)
+model_inst = eval(name)(random_state=0)
+res = pd.DataFrame(model_inst.fit_transform(df), index=df.index)
+if name == "SpectralEmbedding":
+    res[0] *= -1
+pts = (
+    meta.groupby(["patient", "patient_code"])
+    .size()
+    .sort_values()
+    .loc["Patient"]
+)
+pts = pts[pts >= 2].index
+
+res2 = res.set_index(
+    res.index.to_series().str.split("-").apply(lambda x: x[0]), append=True
+).reorder_levels([1, 0])
+
+fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+ax.scatter(res2[0], res2[1])
+akws = dict(
+    width=0.01,
+    head_width=0.15,
+    length_includes_head=True,
+    # color="gray",
+    # linestyle="--",
+    alpha=0.5,
+)
+colors = sns.color_palette("cubehelix", len(pts))
+for j, pt in enumerate(pts):
+    r = res2.loc[pt]
+    ax.scatter(r[0], r[1], color=colors[j])
+    px = 0
+    py = 0
+    for i, (x, y) in r.iterrows():
+        if i != r.index[0]:
+            ax.arrow(px, py, x - px, y - py, color=colors[j], **akws)
+        if i == r.index[-1]:
+            ax.text(x, y, s=pt)
+        px = x
+        py = y
+ax.set(xlabel="UMAP1", ylabel="UMAP2")
+fig.savefig(
+    output_dir
+    / f"covid-facs.cell_type_abundances.{name}.{label1}.{label2}.arrows.svg",
+    **figkws,
+)
+plt.close(fig)
+
+
+# See what's related with UMAP1
+corr = (
+    matrix.join(res[0].rename("UMAP1"))
+    .corr(method="spearman")["UMAP1"]
+    .drop("UMAP1")
+    .sort_values()
+)
+
+fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+ax.axhline(0, linestyle="--", color="gray")
+ax.scatter(corr.index, corr)
+# ax.set_xticklabels(ax.get_xticklabels(), ha="right", rotation=90)
+ax.set(xlabel="Variable", ylabel="Spearman correlation\nwith UMAP 1")
+fig.savefig(
+    output_dir
+    / f"covid-facs.cell_type_abundances.{name}.{label1}.{label2}.correlation_with_UMAP1.svg",
+    **figkws,
+)
+plt.close(fig)
+
+
+n_top = 16
+
+fig, axes = plt.subplots(4, 4, figsize=(4 * 4, 2 * 4), tight_layout=True)
+for ax, var in zip(axes.flatten(), corr.abs().sort_values().tail(n_top).index):
+    ax.scatter(res[0], matrix[var], s=2, alpha=0.5)
+    # ax.set_xticklabels(ax.get_xticklabels(), ha="right", rotation=90)
+    child, parent = var.split("/")
+    ax.set(
+        xlabel="UMAP1",
+        ylabel=f"% {parent}",
+        title=f"{child} - r = {corr[var]:.2f}",
+    )
+fig.savefig(
+    output_dir
+    / f"covid-facs.cell_type_abundances.{name}.{label1}.{label2}.correlated.scatter_with_UMAP1.svg",
+    **figkws,
+)
+plt.close(fig)
+
+
+fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+sns.boxenplot(data=res.join(meta), x=0, y="severity_group", ax=ax)
+for x in ax.get_children():
+    if isinstance(x, patches):
+        x.set_alpha(0.25)
+sns.swarmplot(data=res.join(meta), x=0, y="severity_group", ax=ax)
+ax.set(xlabel="UMAP1")
+fig.savefig(
+    output_dir
+    / f"covid-facs.cell_type_abundances.{name}.{label1}.{label2}.position_in_UMAP1_by_severity_group.svg",
+    **figkws,
+)
+plt.close(fig)
 
 
 # Add lock file
