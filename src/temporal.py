@@ -141,15 +141,13 @@ parent_population = cols[1].rename("parent_population")
 
 
 # Get patients with >= 3 timepoints
-
-
 pts = (
     meta.groupby(["patient", "patient_code"])
     .size()
     .sort_values()
     .loc["Patient"]
 )
-pts = pts[pts >= 2].index
+pts = pts[pts >= 3].index
 
 # pmeta = meta.loc[meta["patient_code"].isin(pts), categories].drop_duplicates()
 
@@ -207,12 +205,13 @@ res.to_csv(output_dir / "gaussian_process.fit.csv")
 p = pd.DataFrame(
     dict(x=np.log1p(res["mean_posterior_std"]), y=np.log1p(res["D"]))
 )
-fig, axes = plt.subplots(1, 1, figsize=(6, 6))
-axes.scatter(p["x"], p["y"])
+fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+ax.set(xlabel="log(Mean posterior std)", ylabel="log(D)")
+ax.scatter(p["x"], p["y"])
 q = p.query("(x > 0.75) | (y > 0.75)")
-texts = text(q["x"], q["y"], q.index, ax=axes)
+texts = text(q["x"], q["y"], q.index, ax=ax)
 adjust_text(
-    texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes,
+    texts, arrowprops=dict(arrowstyle="->", color="black"), ax=ax,
 )
 fig.savefig(output_dir / "gaussian_process.fit.svg", **figkws)
 
@@ -257,6 +256,11 @@ res = pd.concat(_res).rename_axis(index="population")
 res.to_csv(output_dir / "gaussian_process.per_patient.fit.csv")
 
 
+res = pd.read_csv(
+    output_dir / "gaussian_process.per_patient.fit.csv", index_col=0
+)
+
+
 res["direction"] = res["RBF"] > 0
 
 
@@ -268,12 +272,13 @@ res_sum = res.groupby(level=0)["sig"].sum()
 p = pd.DataFrame(
     dict(x=np.log1p(res_mean["mean_posterior_std"]), y=np.log1p(res_mean["D"]))
 )
-fig, axes = plt.subplots(1, 1, figsize=(6, 6))
-axes.scatter(p["x"], p["y"])
+fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+ax.set(xlabel="Mean posterior std", ylabel="D")
+ax.scatter(p["x"], p["y"])
 q = p.query("(x > 1.0) | (y > 0.5)")
-texts = text(q["x"], q["y"], q.index, ax=axes)
+texts = text(q["x"], q["y"], q.index, ax=ax)
 adjust_text(
-    texts, arrowprops=dict(arrowstyle="->", color="black"), ax=axes,
+    texts, arrowprops=dict(arrowstyle="->", color="black"), ax=ax,
 )
 fig.savefig(
     output_dir / "gaussian_process.per_patient.aggregated.fit.svg", **figkws
@@ -314,6 +319,7 @@ fig.savefig(
     output_dir / "gaussian_process.per_patient.top_variable.example.svg",
     **figkws,
 )
+plt.close(fig)
 
 
 # try to summarize metrics across patients somehow
@@ -321,6 +327,45 @@ v = (res["p_value"] < 0.1).groupby(res.index).sum().sort_values() / res[
     "patient"
 ].nunique()
 m = res["D"].groupby(res.index).sum().sort_values()
+
+
+# # Focus on one patient
+for pat in res["patient"].unique():
+    figure = (
+        output_dir / f"gaussian_process.patient_{pat}.top_variable.example.svg"
+    )
+    if figure.exists():
+        continue
+    r = res.query(f"patient == '{pat}'")
+    n_top = r.shape[0]
+    n_rows = int(np.ceil(n_top / 8))
+    fig, axes = plt.subplots(n_rows, 8, figsize=(8 * 3 * 2, n_rows * 3))
+    for i, (patient, pop) in (
+        r.dropna()  # .sort_values("D")
+        .tail(n_top)
+        .reset_index()[["patient", "population"]]
+        .iterrows()
+    ):
+        x = np.log1p(meta.loc[meta["patient_code"] == patient, "time_symptoms"])
+        m, w = gpy_fit_optimize(
+            x.values, matrix.loc[x.index, pop].values, return_model=True
+        )
+        m.plot(ax=axes.flat[i], legend=False)
+        a = w.plot_f(ax=axes.flat[i], legend=False)
+        # a['dataplot'][0].set_color("#e8ab02")
+        a["gpmean"][0][0].set_color("#e8ab02")
+        a["gpconfidence"][0].set_color("#e8ab02")
+        axes.flat[i].set(
+            ylabel=pop,
+            title=f"{patient}; D: {r.loc[pop, 'D']:.2f}; p:{r.loc[pop, 'p_value']:.3f}; SD: {r.loc[pop, 'mean_posterior_std']:.2f}",
+        )
+    for ax in axes.flat:
+        ax.set_xlabel("Time since symptoms")
+    fig.savefig(
+        figure, **figkws,
+    )
+    plt.close(fig)
+
 
 #
 
