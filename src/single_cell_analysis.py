@@ -56,20 +56,20 @@ for panel_name in gating_strategies:
     if not processed_h5ad_combat.exists():
         a = sc.read_h5ad(panel_dir / f"{panel_name}.concatenated.{label}.h5ad")
         if a.to_df().isnull().any().sum() != 0:
-            a = a[~a.to_df().isnull().any(1), :].copy()
+            a = a[~a.to_df().isnull().any(1), :]
 
         # filter out viability pos
         fig, ax = plt.subplots(1, figsize=(4, 4))
         viabl = "Viability(APC-R700-A)"
         x = a[:, a.var.index == viabl].X
         sns.distplot(x, ax=ax, label=viabl)
-        a = a[x < 0][:, ~(a.var.index == viabl)].copy()
+        a = a[x < 0][:, ~(a.var.index == viabl)]
         # filter out CD45 neg
         cd45 = "CD45(V500C-A)"
         if cd45 in a.var.index:
             x = a[:, a.var.index == cd45].X
             sns.distplot(x, ax=ax, label=cd45)
-            a = a[x > 0][:, ~(a.var.index == cd45)].copy()
+            a = a[x > 0][:, ~(a.var.index == cd45)]
         for channel, pop in gating_strategies[panel_name][1:]:
             x = a[:, a.var.index.str.contains(channel, regex=False)].X
             sns.distplot(x, ax=ax, label=channel)
@@ -174,7 +174,7 @@ for panel_name in gating_strategies:
     )
     grid.savefig(
         output_dir
-        / f"{panel}.{label}.cluster_mean_intensity.clustermap.zscore.svg",
+        / f"{panel_name}.{label}.cluster_mean_intensity.clustermap.zscore.svg",
         **figkws,
     )
 
@@ -362,6 +362,56 @@ for panel_name in gating_strategies:
     sns.heatmap(df)
     sns.heatmap(df, center=20, cmap="RdBu_r", robust=True)
     sns.heatmap(fold_change, center=1, cmap="RdBu_r", robust=True)
+
+    # Get patients with >= 3 timepoints
+    pts = (
+        meta.groupby(["patient", "patient_code"])
+        .size()
+        .sort_values()
+        .loc["Patient"]
+    )
+    pts = pts[pts >= 3].index
+
+    pat = "P016"
+
+    p = a[a.obs.query(f"patient_code == '{pat}'").index, :]
+
+    times = sorted(p.obs["time_symptoms"].unique())
+    n_cols = 1 + len(times)
+    fig, axes = plt.subplots(1, n_cols, figsize=(n_cols * 4, 4))
+    k = dict(show=False, size=4)
+    sc.pl.umap(p, color=["time_symptoms"], cmap="rainbow", ax=axes[0], **k)
+    for i, time in enumerate(times, 1):
+        p.obs["plot"] = (p.obs["time_symptoms"] == time).astype(float)
+        print(p.obs["plot"].sum())
+        sc.pl.umap(p, color=["plot"], cmap="Reds", ax=axes[i], vmin=-0.25, **k)
+        axes[i].set_title(time)
+    rasterize_scanpy(fig)
+    fig.savefig(prefix + f"patient_{pat}.global_projection.svg", **figkws)
+
+    # Compare with newly designed space
+    sc.pp.combat(p, "processing_batch_categorical")
+    sc.pp.pca(p)
+    sc.pp.neighbors(p, n_neighbors=50)
+    sc.tl.umap(p)
+    sc.tl.leiden(p, resolution=0.025, key_added="cluster")
+
+    n_cols = max(n_cols, p.shape[1])
+
+    fig, axes = plt.subplots(2, n_cols, figsize=(n_cols * 4, 2 * 4))
+    for i, ch in enumerate(p.var.index):
+        sc.pl.umap(p, color=[ch], ax=axes[0, i], show=False)
+    k = dict(show=False, size=4)
+    sc.pl.umap(p, color=["time_symptoms"], cmap="rainbow", ax=axes[1, 0], **k)
+    for i, time in enumerate(times, 1):
+        p.obs["plot"] = (p.obs["time_symptoms"] == time).astype(float)
+        print(p.obs["plot"].sum())
+        sc.pl.umap(
+            p, color=["plot"], cmap="Reds", ax=axes[1, i], vmin=-0.25, **k
+        )
+        axes[1, i].set_title(time)
+    rasterize_scanpy(fig)
+    fig.savefig(prefix + f"patient_{pat}.own_projection.combat.svg", **figkws)
 
     # # Compare differences in expression between factors
     # res = a.to_df().join(a.obs)
