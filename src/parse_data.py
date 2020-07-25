@@ -325,3 +325,20 @@ matrix.sort_index(0).sort_index(1).to_parquet(data_dir / "matrix.pq")
 meta.join(matrix).to_csv(data_dir / "metadata_and_matrix.csv")
 
 print("Finished.")
+
+
+# Read in absolute count data
+# # (will be used as confirmatory)
+counts = pd.read_excel(original_dir / "absolutes.xlsx", index_col=0)
+first_data_column = "PMN-MDSC_abs"
+i = counts.columns.tolist().index(first_data_column)
+counts = counts.iloc[:, i:]
+counts.columns = counts.columns.str.replace("_abs", "")
+
+cols = counts.columns[counts.columns.to_series().str.split("/").apply(len) == 1]
+counts = counts.rename(columns={c: c + "/LY" for c in cols})
+
+# these values represent cells per microliter
+counts *= 1e3
+
+counts.astype(int).to_parquet(data_dir / "matrix.counts.pq")

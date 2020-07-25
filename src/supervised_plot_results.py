@@ -431,6 +431,9 @@ for i, (model_name, model) in enumerate(list(models.items())):
 n_plot = 20
 interactions = ["severity_group", "intubation", "death", "hospitalization"]
 
+
+meta_c, matrix_c, reduction = (meta_red, red_pat_median, "reduced")
+
 for model_name, model in {
     k: v for k, v in models.items() if "interaction" in k
 }.items():
