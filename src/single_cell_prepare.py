@@ -243,6 +243,11 @@ for panel_name in gating_strategies:
                 if func(int("subsampled" in str(f))).squeeze()
             ]
         )
+        sss = meta.loc[meta["severity_group"] != "non-covid"].index
+        df = df.loc[df["sample"].isin(sss), :]
+        if panel_name == "WB_IgG_IgM":
+            accept = meta.index[meta['accession'].str.split("-").apply(lambda x: int(x[1]) < 144)]
+            df = df.loc[df['sample'].isin(accept), :]
         cell = df.index
         df = df.reset_index(drop=True)
         if panel_name == "WB_IgG_IgM":
