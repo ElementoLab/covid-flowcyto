@@ -26,6 +26,9 @@ else:
         # converters={"percents": lambda value: "{}%".format(value * 100)},
     )
 
+# remove "non-covid" patients
+original = original.query("severity_group != 'non-covid'")
+
 # extract only metadata
 print("Parsing, sanitizing and typing metadata.")
 DATA_COLUMN_INDEX = original.columns.tolist().index(NAME_OF_FIRST_DATA_COLUMN)
@@ -64,6 +67,8 @@ meta["sex"] = (
     .str.replace("m", "Male", case=False)
     .str.replace("f", "Female", case=False)
 )
+
+meta['race'] = meta['race'].replace("non-hispanic", "white").replace("caucasian", "white").replace("no record", np.nan)
 
 # reverse the name of death/live
 meta["death"] = meta["alive"]
@@ -185,13 +190,18 @@ meta["COVID19"] = (
 
 
 # make ordered Categorical
+# # for some categories (e.g. sex, race, severity) I choose a level of the class
+# # to be first as "base" for a contrast in linear model.
+# # This is not to imply any "order", but reflects either the relative abundance of the level
+# # or a contrast that is relevant for the disease.
 cats = {
     "patient": ["Control", "Patient"],
     "COVID19": ["False", "True"],
     "sex": ["Female", "Male"],
+    "race": ["white", "asian", "black", "hispanic"],
     "severity_group": [
         "negative",
-        "non-covid",
+        # "non-covid",
         "mild",
         "severe",
         "convalescent",
@@ -221,7 +231,7 @@ for col in cats:
 meta = meta.join(pd.get_dummies(meta["severity_group"]).replace(0, np.nan))
 
 # add one column to quickly select combinations in linear models
-cats = meta["severity_group"].cat.categories.drop("non-covid")
+cats = meta["severity_group"].cat.categories
 for cat1, cat2 in itertools.combinations(cats, 2):
     meta.loc[meta["severity_group"].isin([cat1, cat2]), cat1 + "_" + cat2] = 1.0
 

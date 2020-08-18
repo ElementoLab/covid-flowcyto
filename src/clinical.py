@@ -16,24 +16,35 @@ variables = CATEGORIES + CONTINUOUS
 
 meta = pd.read_parquet(metadata_file)
 
+remove = [
+    "COVID19",
+    "patient",
+    "hyperlypidemia",
+    "heme",
+    "bone_marrow_transplant",
+    "leukemia_lymphoma",
+    "sleep_apnea",
+    "pcr",
+    "tocilizumab_pretreatment",
+    "tocilizumab_postreatment",
+    "processing_batch_categorical",
+    "datesamples_continuous",
+    "processing_batch_continuous",
+]
+variables = [v for v in variables if v not in remove]
+
+# cats = meta.columns[meta.dtypes == pd.CategoricalDtype()]
+
 
 # Variable correlation
 
-to_corr = meta.drop_duplicates(subset="patient_code")[variables].copy()
-
-for col in to_corr.columns[to_corr.dtypes == "category"]:
-    to_corr[col] = meta[col].cat.codes
-
-for col in to_corr.columns[
-    to_corr.dtypes.apply(lambda x: x.name).str.contains("datetime")
-]:
-    to_corr[col] = minmax_scale(to_corr[col])
-
-corrs = to_corr.corr(method="spearman").drop("patient", 0).drop("patient", 1)
-
+to_corr = pd.get_dummies(
+    meta.drop(remove, axis=1).drop_duplicates(subset="patient_code")[variables]
+)
+corrs = to_corr.corr(method="spearman")
 
 kwargs = dict(
-    # center=0,
+    center=0,
     cmap="RdBu_r",
     cbar_kws={"label": "Spearman correlation"},
     square=True,
@@ -48,7 +59,14 @@ fig.savefig(
 
 
 # first do the correlation with nan filled
-grid = sns.clustermap(corrs.fillna(np.nanmean(corrs.values)), **kwargs)
+grid = sns.clustermap(
+    corrs.fillna(np.nanmean(corrs.values)), metric="correlation", **kwargs
+)
+grid.savefig(
+    output_dir / "clinial_parameters.parameter_correlation.clustermap.svg",
+    **figkws
+)
+
 # then plot with heatmap ordered to still display NaNs
 fig, ax = plt.subplots(1, 1, figsize=(8, 8))
 sns.heatmap(
@@ -64,13 +82,34 @@ fig.savefig(
 )
 
 # Patient correlation in clinical variables only
-p_corr = to_corr.query("COVID19 == 1").loc[:, corrs.index]
-# # quickly impute missing batch for three patients
-for col in p_corr.columns[p_corr.isnull().any()]:
-    p_corr.loc[p_corr[col].isnull(), col] = p_corr[col].dropna().mean()
+to_corr = pd.get_dummies(
+    meta.query("severity_group != 'negative'")
+    .drop(remove, axis=1)
+    .drop_duplicates(subset="patient_code")[variables]
+)
+to_corr = to_corr.drop(to_corr.columns[(to_corr == 0).all()], axis=1)
+
+f_corr = to_corr.corr(method="spearman")
+p_corr = to_corr.T.corr(method="spearman")
+
 grid = sns.clustermap(
-    p_corr.T.corr(method="spearman"),
-    center=0.5,
+    f_corr.corr(method="spearman"),
+    center=0,
+    cmap="RdBu_r",
+    cbar_kws=dict(label="Spearman correlation"),
+    xticklabels=True,
+    yticklabels=True,
+    figsize=(12, 11),
+)
+grid.savefig(
+    output_dir / "clinial_parameters.parameter_correlation.patients.svg",
+    **figkws
+)
+
+
+grid = sns.clustermap(
+    p_corr.corr(method="spearman"),
+    center=0,
     cmap="RdBu_r",
     cbar_kws=dict(label="Spearman correlation"),
     xticklabels=True,
@@ -79,7 +118,9 @@ grid = sns.clustermap(
     colors_ratio=0.15 / sample_variables.shape[1],
     figsize=(12, 11),
 )
-grid.savefig(output_dir / "clinial_parameters.sample_correlation.svg", **figkws)
+grid.savefig(
+    output_dir / "clinial_parameters.sample_correlation.patients.svg", **figkws
+)
 
 
 # Get Supl Fig. 1 / Table

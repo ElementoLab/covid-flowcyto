@@ -29,6 +29,7 @@ models[model_name] = model
 # Model 2: look deep into patients
 categories = [
     "sex",
+    "race",
     "COVID19",
     "severity_group",
     "hospitalization",
@@ -56,6 +57,7 @@ models[model_name] = model
 categories = [
     "severe",  # <- this is a special one which simply selects for this group
     "sex",
+    "race",
     "tocilizumab",
 ]
 continuous = [
@@ -82,6 +84,7 @@ for factor in f:
     categories = [
         factor,
         "sex",
+        "race",
     ]
     continuous = []
     technical = []
@@ -101,6 +104,7 @@ categories = [
     "negative_mild",  # <- this is a special one which simply selects for these groups
     "severity_group",
     "sex",
+    # "race", # <- here I can't include race because it is not available in controls
 ]
 continuous = ["age"]
 technical = ["processing_batch_continuous"]
@@ -121,6 +125,7 @@ categories = [
     "mild_convalescent",  # <- this is a special one which simply selects for these groups
     "severity_group",
     "sex",
+    "race",
 ]
 continuous = ["age"]
 technical = ["processing_batch_continuous"]
@@ -141,6 +146,7 @@ models[model_name] = model
 categories = [
     "mild_severe",  # <- this is a special one which simply selects for these groups
     "sex",
+    "race",
     "tocilizumab",
 ]
 continuous = ["age", "time_symptoms"]

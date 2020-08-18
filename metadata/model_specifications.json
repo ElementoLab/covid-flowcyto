@@ -18,6 +18,7 @@
     "2-covid": {
         "covariates": [
             "sex",
+            "race",
             "COVID19",
             "severity_group",
             "hospitalization",
@@ -32,6 +33,7 @@
         ],
         "categories": [
             "sex",
+            "race",
             "COVID19",
             "severity_group",
             "hospitalization",
@@ -51,12 +53,14 @@
         "covariates": [
             "severe",
             "sex",
+            "race",
             "tocilizumab",
             "age"
         ],
         "categories": [
             "severe",
             "sex",
+            "race",
             "tocilizumab"
         ],
         "continuous": [
@@ -67,11 +71,13 @@
     "4-interaction_sex_severity_group": {
         "covariates": [
             "severity_group",
-            "sex"
+            "sex",
+            "race"
         ],
         "categories": [
             "severity_group",
-            "sex"
+            "sex",
+            "race"
         ],
         "continuous": [],
         "formula": "~ sex * severity_group"
@@ -79,11 +85,13 @@
     "4-interaction_sex_death": {
         "covariates": [
             "death",
-            "sex"
+            "sex",
+            "race"
         ],
         "categories": [
             "death",
-            "sex"
+            "sex",
+            "race"
         ],
         "continuous": [],
         "formula": "~ sex * death"
@@ -91,11 +99,13 @@
     "4-interaction_sex_hospitalization": {
         "covariates": [
             "hospitalization",
-            "sex"
+            "sex",
+            "race"
         ],
         "categories": [
             "hospitalization",
-            "sex"
+            "sex",
+            "race"
         ],
         "continuous": [],
         "formula": "~ sex * hospitalization"
@@ -103,11 +113,13 @@
     "4-interaction_sex_intubation": {
         "covariates": [
             "intubation",
-            "sex"
+            "sex",
+            "race"
         ],
         "categories": [
             "intubation",
-            "sex"
+            "sex",
+            "race"
         ],
         "continuous": [],
         "formula": "~ sex * intubation"
@@ -115,11 +127,13 @@
     "4-interaction_sex_tocilizumab": {
         "covariates": [
             "tocilizumab",
-            "sex"
+            "sex",
+            "race"
         ],
         "categories": [
             "tocilizumab",
-            "sex"
+            "sex",
+            "race"
         ],
         "continuous": [],
         "formula": "~ sex * tocilizumab"
@@ -147,13 +161,15 @@
             "mild_convalescent",
             "severity_group",
             "sex",
+            "race",
             "age",
             "processing_batch_continuous"
         ],
         "categories": [
             "mild_convalescent",
             "severity_group",
-            "sex"
+            "sex",
+            "race"
         ],
         "continuous": [
             "age"
@@ -164,6 +180,7 @@
         "covariates": [
             "mild_severe",
             "sex",
+            "race",
             "tocilizumab",
             "age",
             "time_symptoms",
@@ -172,6 +189,7 @@
         "categories": [
             "mild_severe",
             "sex",
+            "race",
             "tocilizumab"
         ],
         "continuous": [

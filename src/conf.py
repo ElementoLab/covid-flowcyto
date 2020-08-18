@@ -67,6 +67,7 @@ original_dir = Path("data") / "original"
 metadata_dir = Path("metadata")
 data_dir = Path("data")
 results_dir = Path("results")
+figures_dir = Path("figures")
 
 for _dir in [original_dir, metadata_dir, data_dir, results_dir]:
     _dir.mkdir(exist_ok=True, parents=True)
@@ -77,35 +78,37 @@ matrix_imputed_file = data_dir / "matrix_imputed.pq"
 matrix_imputed_reduced_file = data_dir / "matrix_imputed_reduced.pq"
 
 # Sample metadata
-ORIGINAL_FILE_NAME = "clinical_data.joint.20200723.csv"
+ORIGINAL_FILE_NAME = "clinical_data.joint.20200803.csv"
 NAME_OF_FIRST_DATA_COLUMN = "LY/All_CD45"
 
 # # variables
 CATEGORIES = [
     "sex",
-    "patient",
+    "race",
+    # "patient",
     "COVID19",
     "severity_group",
     "hospitalization",
     "intubation",
     "death",
-    "heme",
-    "bone_marrow_transplant",
+    # "heme",
+    # "bone_marrow_transplant",
     "obesity",
-    "leukemia_lymphoma",
+    # "leukemia_lymphoma",
     "diabetes",
     "hypertension",
     # "hyperlypidemia",
-    "sleep_apnea",
+    # "sleep_apnea",
     "tocilizumab",
     # "tocilizumab_pretreatment",
     # "tocilizumab_postreatment",
-    "pcr",
+    # "pcr",
     "processing_batch_categorical",
 ]
 CATEGORIES_T1 = [
     "sex",
-    "patient",
+    "race",
+    # "patient",
     "COVID19",
     "severity_group",
     "hospitalization",
@@ -140,6 +143,29 @@ for name, strat in specs.items():
     gating_strategies[name] = GatingStrategy(strat)
 
 
+# Set default color palette
+# # same as default but with second color (orange) in the end
+colorblind = sns.palettes.color_palette()
+tab20c = sns.color_palette("tab20c")
+dark2 = sns.color_palette("Dark2")
+set1 = sns.color_palette("Set1")
+palettes = dict()
+palettes["sex"] = dark2[:2]
+palettes["race"] = set1[1:5]
+palettes["severity_group"] = [
+    colorblind[2],
+    colorblind[1],
+    colorblind[3],
+    colorblind[0],
+]
+palettes["obesity"] = tab20c[:3]
+palettes["processing_batch_categorical"] = tab20c
+for cat in CATEGORIES:
+    if cat not in palettes:
+        palettes[cat] = colorblind
+sns.set(palette=colorblind, style="ticks")
+
+
 try:
     meta = pd.read_parquet(metadata_file)
     matrix = pd.read_parquet(matrix_imputed_file)
@@ -161,12 +187,12 @@ try:
         .join(pd.Series(panel, name="panel"))
         .join(matrix.mean().rename("Mean"))
         .join(
-            matrix.loc[meta["patient"] == "Control"]
+            matrix.loc[meta["severity_group"] == "negative"]
             .mean()
             .rename("Mean control")
         )
         .join(
-            matrix.loc[meta["patient"] == "Patient"]
+            matrix.loc[meta["severity_group"] != "negative"]
             .mean()
             .rename("Mean patient")
         )
