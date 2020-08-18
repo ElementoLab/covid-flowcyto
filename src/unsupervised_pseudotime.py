@@ -28,7 +28,14 @@ def plot_projection(x, meta, cols, n_dims=4, algo_name="PCA"):
     )
 
     for i, cat in enumerate(cols):
-        colors = to_color_series(meta[cat])
+        try:
+            colors = pd.Series(palettes.get(cat)).reindex(meta[cat].cat.codes)
+            colors.index = meta.index
+        except AttributeError:  # not a categorical
+            try:
+                colors = to_color_series(meta[cat], palettes.get(cat))
+            except (TypeError, ValueError):
+                colors = to_color_series(meta[cat])
         for pc in x.columns[:n_dims]:
             for value in meta[cat].unique():
                 idx = meta[cat].isin([value])  # to handle nan correctly
@@ -68,11 +75,22 @@ for name in ["UMAP", "SpectralEmbedding"]:
     if name == "SpectralEmbedding":
         res[0] *= -1
 
+    # Plot projection
+    res2 = res.copy()
+    res2[1] = np.log(matrix["MY/All_CD45"]) - np.log(matrix["LY/All_CD45"])
+    fig = plot_projection(res2, meta, ["severity_group"], 1, name)
+    fig.savefig(
+        prefix + ".pseudotime_vs_myeloid-lymphoid_logratio.svg", **figkws
+    )
+    plt.close(fig)
+
     # Plot projection with only first samples of patients
     meta_r = meta.sort_values("datesamples").drop_duplicates(
         subset=["patient_code"], keep="first"
     )
-    fig = plot_projection(res.loc[meta_r.index], meta_r, ["severity_group"], 1)
+    fig = plot_projection(
+        res.loc[meta_r.index], meta_r, ["severity_group"], 1, name
+    )
     fig.savefig(
         prefix + ".only_first_samples.svg", **figkws,
     )
@@ -81,7 +99,9 @@ for name in ["UMAP", "SpectralEmbedding"]:
     meta_r = meta.sort_values("datesamples").drop_duplicates(
         subset=["patient_code"], keep="last"
     )
-    fig = plot_projection(res.loc[meta_r.index], meta_r, ["severity_group"], 1)
+    fig = plot_projection(
+        res.loc[meta_r.index], meta_r, ["severity_group"], 1, name
+    )
     fig.savefig(
         prefix + ".only_last_samples.svg", **figkws,
     )
@@ -124,7 +144,7 @@ for name in ["UMAP", "SpectralEmbedding"]:
     )
     plt.close(fig)
 
-    # See what's related with UMAP1
+    # See what's related with major axis
 
     if name == "UMAP":
         # standardize
@@ -326,3 +346,25 @@ for name in ["UMAP", "SpectralEmbedding"]:
         prefix + ".position_in_gradient_by_severity_group.svg", **figkws,
     )
     plt.close(fig)
+
+    grid = sns.clustermap(
+        matrix.loc[res.sort_values(0).index, corr.sort_values().index],
+        row_cluster=False,
+        col_cluster=False,
+        metric="correlation",
+        row_colors=meta.loc[res.sort_values(0).index, ["severity_group"]].join(
+            res[0].sort_values().rename("pseudotime")
+        ),
+        z_score=1,
+        cmap="RdBu_r",
+        center=0,
+        robust=True,
+        figsize=(4, 2),
+        xticklabels=False,
+        yticklabels=False,
+        rasterized=True,
+    )
+    grid.fig.savefig(
+        prefix + ".samples_sorted.variable_gradient.heatmap.svg", **figkws,
+    )
+    plt.close(grid.fig)
