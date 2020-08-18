@@ -230,8 +230,8 @@ for panel_name in gating_strategies:
 
     for label, func in [("full", np.logical_not), ("subsampled", np.identity)]:
         output_h5ad = panel_dir / f"{panel_name}.concatenated.{label}.h5ad"
-        if output_h5ad.exists():
-            continue
+        # if output_h5ad.exists():
+        #     continue
         print(panel_name, label)
 
         df = pd.concat(
