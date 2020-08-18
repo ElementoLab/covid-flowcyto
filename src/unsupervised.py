@@ -43,7 +43,14 @@ def plot_projection(x, meta, cols, n_dims=4, algo_name="PCA"):
     )
 
     for i, cat in enumerate(cols):
-        colors = to_color_series(meta[cat])
+        try:
+            colors = pd.Series(palettes.get(cat)).reindex(meta[cat].cat.codes)
+            colors.index = meta.index
+        except AttributeError:  # not a categorical
+            try:
+                colors = to_color_series(meta[cat], palettes.get(cat))
+            except (TypeError, ValueError):
+                colors = to_color_series(meta[cat])
         for pc in x.columns[:n_dims]:
             for value in meta[cat].unique():
                 idx = meta[cat].isin([value])  # to handle nan correctly
@@ -88,32 +95,50 @@ variable_classes = (
     .join(pd.Series(panel, name="panel"))
     .join(matrix.mean().rename("Mean"))
     .join(
-        matrix.loc[meta["patient"] == "Control"].mean().rename("Mean control")
+        matrix.loc[meta["severity_group"] == "negative"]
+        .mean()
+        .rename("Mean control")
     )
     .join(
-        matrix.loc[meta["patient"] == "Patient"].mean().rename("Mean patient")
+        matrix.loc[meta["severity_group"] != "negative"]
+        .mean()
+        .rename("Mean patient")
     )
 )
 
 
+# Read up various matrices that were used for fitting
+meta_red = pd.read_parquet(metadata_dir / "annotation.reduced_per_patient.pq")
+red_pat_early = pd.read_parquet("data/matrix_imputed_reduced.red_pat_early.pq")
+red_pat_median = pd.read_parquet(
+    "data/matrix_imputed_reduced.red_pat_median.pq"
+)
+
 # Demonstrate the data
-
-
+# matrix = red_pat_early
+# meta = meta_red
+reduction = "reduced"
+# reduction = "reduced_early"
 # # Plot abundance of major populations for each patient group
 # + a few ratios like CD4/CD8 (of CD3+)
 for cat_var in categories:
     # cat_var = "severity_group"
 
-    for panel in variable_classes["panel"].unique():
+    for panel_name in variable_classes["panel"].unique():
+        # panel_name = "Major"
         figfile = (
             output_dir
-            / f"variable_illustration.{cat_var}.panel_{panel}.swarm+boxen.svg"
+            / f"variable_illustration.{cat_var}.panel_{panel_name}.{reduction}.swarm+boxen.svg"
         )
-        if figfile.exists():
-            continue
+        # if figfile.exists():
+        #     continue
 
+        print(cat_var, panel_name)
+
+        v = variable_classes.query(f"panel == '{panel_name}'").index.tolist()
+        v = [vv for vv in v if vv in matrix.columns]
         data = (
-            matrix.loc[:, variable_classes.query(f"panel == '{panel}'").index]
+            matrix.loc[:, v]
             .join(meta[[cat_var]])
             .melt(
                 id_vars=[cat_var],
@@ -127,24 +152,21 @@ for cat_var in categories:
             x=cat_var,
             y="abundance (%)",
             hue=cat_var,
-            palette="tab10",
+            palette=palettes.get(cat_var),
         )
-        grid = sns.FacetGrid(
-            data=data, col="population", sharey=False, height=3, col_wrap=4
-        )
+        gridkws = dict(sharey=False, height=3, aspect=1, col_wrap=4)
+        grid = sns.FacetGrid(data=data, col="population", **gridkws)
         grid.map_dataframe(sns.boxenplot, saturation=0.5, dodge=False, **kws)
-        # grid.map_dataframe(sns.stripplot, y="value", x=category, hue=category, data=data, palette='tab10')
-
         for ax in grid.axes.flat:
             for x in ax.get_children():
                 if isinstance(x, patches):
                     x.set_alpha(0.25)
-        grid.map_dataframe(sns.swarmplot, **kws)
 
+        grid.map_dataframe(sns.swarmplot, **kws)
         for ax in grid.axes.flat:
             ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
 
-        # add stats to title
+        # better title
         for ax in grid.axes.flat:
             var = ax.get_title().replace("population = ", "")
             try:
@@ -154,23 +176,24 @@ for cat_var in categories:
             except IndexError:
                 ax.set_title(var)
 
-        # grid.map(sns.boxplot)
         grid.savefig(figfile)
         plt.close(grid.fig)
 
 
 # # Simply correlate with clinical continuous
 for num_var in continuous:
-    for panel in variable_classes["panel"].unique():
+    for panel_name in variable_classes["panel"].unique():
         figfile = (
             output_dir
-            / f"variable_illustration.{num_var}.panel_{panel}.swarm+boxen.svg"
+            / f"variable_illustration.{num_var}.panel_{panel_name}.swarm+boxen.svg"
         )
-        if figfile.exists():
-            continue
+        # if figfile.exists():
+        #     continue
 
         data = (
-            matrix.loc[:, variable_classes.query(f"panel == '{panel}'").index]
+            matrix.loc[
+                :, variable_classes.query(f"panel == '{panel_name}'").index
+            ]
             .join(meta[[num_var]])
             .melt(
                 id_vars=[num_var],
@@ -210,14 +233,16 @@ for df, label1 in [(matrix, "full"), (matrix_red_var, "reduced")]:
         metric="correlation",
         robust=True,
         figsize=(12, 8),
-        row_colors=sample_variables,
-        col_colors=variable_classes.loc[df.columns],
+        row_colors=sample_variables[
+            ["severity_group", "hospitalization", "intubation", "death", "sex"]
+        ],
+        # col_colors=variable_classes.loc[df.columns],
         colors_ratio=(
             0.15 / sample_variables.shape[1],
             0.15 / variable_classes.loc[df.columns].shape[1],
         ),
         dendrogram_ratio=0.1,
-        rasterized=True,
+        # rasterized=True,
         xticklabels=True,
         yticklabels=True,
     )
@@ -282,51 +307,52 @@ for df, label1 in [(matrix, "full"), (matrix_red_var, "reduced")]:
     # # Do the same for the major components, LY, CD3, CD20, Myeloid, etc...
     # # or for each parent
 
-    for panel in variable_classes.loc[df.columns]["panel"].unique():
-        q = variable_classes.loc[df.columns]["panel"] == panel
-        if df.loc[:, q].shape[1] < 2:
-            continue
+    # for panel_name in variable_classes.loc[df.columns]["panel"].unique():
+    #     q = variable_classes.loc[df.columns]["panel"] == panel_name
+    #     if df.loc[:, q].shape[1] < 2:
+    #         continue
 
-        # kws = kwargs.copy()
-        # kws.update(dict(figsize=np.asarray(df.loc[:, q].shape) * 0.05))
-        grid = sns.clustermap(
-            df.loc[:, q],
-            z_score=1,
-            cmap="RdBu_r",
-            center=0,
-            cbar_kws=dict(
-                label="Cell type abundance\n(Z-score)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
-            ),
-            **kwargs,
-        )
-        fix_clustermap_fonts(grid)
-        grid.savefig(
-            output_dir / (prefix + f"only_{panel}.clustermap.svg"), **figkws
-        )
-        plt.close(grid.fig)
+    #     # kws = kwargs.copy()
+    #     # kws.update(dict(figsize=np.asarray(df.loc[:, q].shape) * 0.05))
+    #     grid = sns.clustermap(
+    #         df.loc[:, q],
+    #         z_score=1,
+    #         cmap="RdBu_r",
+    #         center=0,
+    #         cbar_kws=dict(
+    #             label="Cell type abundance\n(Z-score)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
+    #         ),
+    #         **kwargs,
+    #     )
+    #     fix_clustermap_fonts(grid)
+    #     grid.savefig(
+    #         output_dir / (prefix + f"only_{panel_name}.clustermap.svg"),
+    #         **figkws,
+    #     )
+    #     plt.close(grid.fig)
 
-    for population in parent_population.unique():
-        q = parent_population == population
-        if df.loc[:, q].shape[1] < 2:
-            continue
-        # kws = kwargs.copy()
-        # kws.update(dict(figsize=np.asarray(df.loc[:, q].shape) * 0.05))
-        grid = sns.clustermap(
-            df.loc[:, q],
-            z_score=1,
-            cmap="RdBu_r",
-            center=0,
-            cbar_kws=dict(
-                label="Cell type abundance\n(Z-score)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
-            ),
-            **kwargs,
-        )
-        fix_clustermap_fonts(grid)
-        grid.savefig(
-            output_dir / (prefix + f"only_{population}.clustermap.svg"),
-            **figkws,
-        )
-        plt.close(grid.fig)
+    # for population in parent_population.unique():
+    #     q = parent_population == population
+    #     if df.loc[:, q].shape[1] < 2:
+    #         continue
+    #     # kws = kwargs.copy()
+    #     # kws.update(dict(figsize=np.asarray(df.loc[:, q].shape) * 0.05))
+    #     grid = sns.clustermap(
+    #         df.loc[:, q],
+    #         z_score=1,
+    #         cmap="RdBu_r",
+    #         center=0,
+    #         cbar_kws=dict(
+    #             label="Cell type abundance\n(Z-score)",  # , orientation="horizontal", aspect=0.2, shrink=0.2
+    #         ),
+    #         **kwargs,
+    #     )
+    #     fix_clustermap_fonts(grid)
+    #     grid.savefig(
+    #         output_dir / (prefix + f"only_{population}.clustermap.svg"),
+    #         **figkws,
+    #     )
+    #     plt.close(grid.fig)
 
 
 # highly variable variables
@@ -361,8 +387,8 @@ for mat, met, label1 in [
         (MDS, dict(n_dims=1), dict()),
         (TSNE, dict(n_dims=1), dict()),
         (Isomap, dict(n_dims=1), dict()),
-        (SpectralEmbedding, dict(n_dims=1), dict()),
         (UMAP, dict(n_dims=1), dict(random_state=0)),
+        (SpectralEmbedding, dict(n_dims=1), dict()),
     ][::-1]:
         name = str(model).split(".")[-1].split("'")[0]
         model_inst = model(**mkwargs)
