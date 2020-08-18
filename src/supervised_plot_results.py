@@ -257,7 +257,11 @@ for a, b in reducts:
 # Plot outcomes
 # # In this case, I will use the stats from the models fitted on the largest
 # # sample sizes, *but plot* the data with one dot per patient
-meta_c, matrix_c, reduction = (meta_red, red_pat_median, "reduced")
+# meta_c, matrix_c, reduction = (meta_red, red_pat_early, "reduced")
+
+
+# scratch that, plotting all as was fit
+meta_c, matrix_c, reduction = (meta_reduced, matrix_reduced, "reduced")
 per_panel = True
 
 for i, (model_name, model) in enumerate(list(models.items())):
@@ -414,6 +418,8 @@ for i, (model_name, model) in enumerate(list(models.items())):
                         .tail(n_plot)
                         .index[::-1]
                     )
+                    if sigs.empty:
+                        continue
                     data = (
                         matrix_c[sigs]
                         .join(meta_c[variable])
@@ -429,10 +435,7 @@ for i, (model_name, model) in enumerate(list(models.items())):
 
 # # Illustrate top hits for interaction models
 n_plot = 20
-interactions = ["severity_group", "intubation", "death", "hospitalization"]
-
-
-meta_c, matrix_c, reduction = (meta_red, red_pat_median, "reduced")
+meta_c, matrix_c, reduction = (meta_reduced, matrix_reduced, "reduced")
 
 for model_name, model in {
     k: v for k, v in models.items() if "interaction" in k
@@ -495,6 +498,7 @@ for model_name, model in {
             + f"Coef = {c:.3f}; "
             + f"FDR = {s['qval'].min():.3e}"
         )
+    grid.add_legend()
 
     # grid.map(sns.boxplot)
     grid.savefig(output_dir / prefix + f"{variable}.swarm+boxenplot.svg")

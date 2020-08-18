@@ -139,15 +139,15 @@ red_pat_median = pd.read_parquet(
 )
 
 # Fit
-for model_name, model in list(models.items())[:-3]:
+for model_name, model in list(models.items()):
     formula = model["formula"] if "formula" in model else None
 
     ## m, d, reduction, covariates = (meta_reduced, matrix_reduced, "reduced", model['covariates'])
     matrices = [
-        (meta, matrix_red_var, "original", model["covariates"]),
-        (meta_reduced, matrix_reduced, "reduced", model["covariates"]),
-        (meta_red, red_pat_early, "reduced_early", model["covariates"],),
-        (meta_red, red_pat_median, "reduced_median", model["covariates"],),
+        # (meta, matrix_red_var, "original", model["covariates"]),
+        (meta_reduced, matrix_reduced, "reduced", model["covariates"],),
+        # (meta_red, red_pat_early, "reduced_early", model["covariates"],),
+        # (meta_red, red_pat_median, "reduced_median", model["covariates"],),
     ]
     for m, d, reduction, covariates in matrices:
         results_file = (
