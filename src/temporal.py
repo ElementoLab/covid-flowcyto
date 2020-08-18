@@ -95,6 +95,9 @@ def fit_MOHGP(x, y, n_clust_guess=4):
         input_dim=1, variance=0.5, lengthscale=x.max() / 3.0
     ) + GPy.kern.White(1, variance=0.01)
 
+    k_underlying = GPy.kern.RBF(input_dim=1) + GPy.kern.Bias(input_dim=1)
+    k_corruption = GPy.kern.White(input_dim=1) + GPy.kern.Bias(input_dim=1)
+
     print("Fitting.")
     model = GPclust.MOHGP(
         X=x,
@@ -208,18 +211,20 @@ for x, label, limit in [
     xmin, ymin = limit
     prefix = output_dir / f"gaussian_process.{label}"
 
+    mat = 10 ** (matrix / 100.0)
+    mat = mat - mat.mean()
+
     res = pd.concat(
         [
-            gpy_fit_optimize(x.values, matrix.loc[x.index, pop].values).rename(
-                pop
-            )
-            for pop in matrix.columns
+            gpy_fit_optimize(x.values, mat.loc[x.index, pop].values).rename(pop)
+            for pop in mat.columns
         ],
         axis=1,
     ).T
     res["log_p_value"] = log_pvalues(res["p_value"])
     res.index.name = "variable"
     res.to_csv(prefix + "fit.csv")
+    res = pd.read_csv(prefix + "fit.csv", index_col=0)
 
     # # plot stats
     p = pd.DataFrame(
@@ -236,14 +241,14 @@ for x, label, limit in [
     fig.savefig(prefix + "fit.svg", **figkws)
 
     # # plot examples
-    q = res.sort_values("p_value").head(20)
-    fig, axis = plt.subplots(1, q.shape[0], figsize=(q.shape[0] * 3, 3))
+    q = res.sort_values("p_value").head(40)
+    fig, axis = plt.subplots(8, 5, figsize=(5 * 4, 8 * 2))
+    axis = axis.flatten()
     for i, pop in enumerate(q.index):
-        m, w = gpy_fit_optimize(
-            x.values, matrix.loc[x.index, pop].values, return_model=True
-        )
-
-        m.plot(ax=axis[i], legend=False)
+        xy = x.values, mat.loc[x.index, pop].values
+        m, w = gpy_fit_optimize(*xy, return_model=True)
+        axis[i].scatter(*xy, s=4, alpha=0.5)
+        m.plot_f(ax=axis[i], legend=False)
         a = w.plot_f(ax=axis[i], legend=False)
         # a['dataplot'][0].set_color("#e8ab02")
         a["gpmean"][0][0].set_color("#e8ab02")
@@ -254,7 +259,28 @@ for x, label, limit in [
         )
     for ax in axis:
         ax.set_xlabel("Time since symptoms")
-    fig.savefig(prefix + "top_variable.example.svg", **figkws)
+    fig.savefig(prefix + "top_variable.transformed.example.svg", **figkws)
+
+    # # plot all
+    q = res
+    fig, axis = plt.subplots(10, 15, figsize=(15 * 4, 10 * 2))
+    axis = axis.flatten()
+    for i, pop in enumerate(q.index):
+        xy = x.values, mat.loc[x.index, pop].values
+        m, w = gpy_fit_optimize(*xy, return_model=True)
+        axis[i].scatter(*xy, s=4, alpha=0.5)
+        m.plot_f(ax=axis[i], legend=False)
+        a = w.plot_f(ax=axis[i], legend=False)
+        # a['dataplot'][0].set_color("#e8ab02")
+        a["gpmean"][0][0].set_color("#e8ab02")
+        a["gpconfidence"][0].set_color("#e8ab02")
+        axis[i].set(
+            ylabel=pop,
+            title=f"D: {res.loc[pop, 'D']:.2e}; p:{res.loc[pop, 'p_value']:.2e}; SD: {res.loc[pop, 'mean_posterior_std']:.2f}",
+        )
+    for ax in axis:
+        ax.set_xlabel("Time since symptoms")
+    fig.savefig(prefix + "all_variables.transformed.svg", **figkws)
 
     # Now do the same for each patient independently
     _res = list()
@@ -386,11 +412,12 @@ for x, label, limit in [
 
     # Try to cluster cell types based on temporal behaviour using a MOHGP
     Y = zscore(matrix.loc[x.index])
-    model = fit_MOHGP(x.values.reshape((-1, 1)), Y.values, 6)
+    Y = zscore(mat.loc[x.index])
+    model = fit_MOHGP(x.values.reshape((-1, 1)), Y.values, n_clust_guess=8)
 
     print("Plotting cluster posteriors.")
     # Plot clusters
-    fig = plt.figure()
+    fig, axes = plt.subplots(1, 1, figsize=(6, 1.5), sharey=False)
     model.plot(
         newfig=False,
         on_subplots=True,
@@ -400,12 +427,19 @@ for x, label, limit in [
         errorbars=False,
     )
     for ax in fig.axes:
-        ax.set_rasterized(True)
+        for ch in ax.get_children():
+            if isinstance(ch, matplotlib.lines.Line2D):
+                ch.set_rasterized(True)
         ax.set_ylabel("Population abundance")
         ax.set_xlabel("Time (log2)")
     fig.savefig(prefix + "mohgp.fitted_model.clusters.svg", **figkws)
 
     print("Plotting parameters/probabilities.")
+    probs = pd.DataFrame(model.phi, index=mat.columns).rename_axis(
+        columns="cluster"
+    )
+    probs.to_csv(prefix + "mohgp.probabilities.csv")
+
     # Posterior parameters
     fig, axis = plt.subplots(
         2,
@@ -414,14 +448,14 @@ for x, label, limit in [
         figsize=(3 * 4, 1 * 4),
         tight_layout=True,
     )
-    mat = axis[0].imshow(
-        model.phi.T, cmap=plt.get_cmap("hot"), vmin=0, vmax=1, aspect="auto"
+    matshow = axis[0].imshow(
+        probs.T, cmap=plt.get_cmap("hot"), vmin=0, vmax=1, aspect="auto"
     )
     axis[0].set_xlabel("Region index")
     axis[0].set_ylabel("Cluster index")
     axis[1].set_aspect(0.1)
     plt.colorbar(
-        mat,
+        matshow,
         cax=axis[1],
         label="Posterior probability",
         orientation="horizontal",
@@ -449,22 +483,22 @@ for x, label, limit in [
 
     # Clustermap with cluster assignments
     print("Plotting clusters.")
-    tp = pd.Series(
-        matrix.columns.get_level_values("timepoint")
-        .str.replace("d", "")
-        .astype(int),
-        index=matrix.columns,
-    ).sort_values()
+    # tp = pd.Series(
+    #     matrix.columns.get_level_values("timepoint")
+    #     .str.replace("d", "")
+    #     .astype(int),
+    #     index=matrix.columns,
+    # ).sort_values()
 
     g2 = sns.clustermap(
-        matrix.loc[x.index],
-        col_colors=[plt.get_cmap("Paired")(i) for i in np.argmax(model.phi, 1)],
+        mat.loc[x.index],
+        col_colors=[plt.get_cmap("Set1")(i) for i in np.argmax(model.phi, 1)],
         row_cluster=False,
         col_cluster=True,
         z_score=1,
         xticklabels=False,
         rasterized=True,
-        figsize=(8, 0.2 * matrix.shape[1]),
+        figsize=(8, 0.2 * mat.shape[1]),
         metric="correlation",
         robust=True,
     )
@@ -477,17 +511,17 @@ for x, label, limit in [
         prefix + "mohgp.fitted_model.clustermap.cluster_labels.svg", **figkws,
     )
 
-    matrix_mean = matrix.loc[x.index].groupby(x).mean()
+    mat_mean = mat.loc[x.index].groupby(x).mean()
     g3 = sns.clustermap(
-        matrix_mean,
-        col_colors=[plt.get_cmap("Paired")(i) for i in np.argmax(model.phi, 1)],
+        mat_mean,
+        col_colors=[plt.get_cmap("Set1")(i) for i in np.argmax(model.phi, 1)],
         row_cluster=False,
         col_cluster=True,
         z_score=1,
         xticklabels=False,
         yticklabels=True,
         rasterized=True,
-        figsize=(8, 0.2 * matrix_mean.shape[0]),
+        figsize=(8, 0.2 * mat_mean.shape[0]),
         metric="correlation",
         robust=True,
     )
