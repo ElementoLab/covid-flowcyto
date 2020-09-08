@@ -6,6 +6,8 @@
 
 import re
 
+import pingouin as pg
+
 from src.conf import *
 
 
@@ -232,3 +234,25 @@ for ax in grid.axes.flat:
 
 grid.savefig(figfile)
 plt.close(grid.fig)
+
+
+data = (matrix.loc[:, v].join(meta[[cat_var]])).dropna()
+
+groups = (
+    data["group"]
+    .value_counts()[data["group"].value_counts() > 1]
+    .index.tolist()
+)
+data = data.loc[data["group"].isin(groups), :]
+data["group"] = data["group"].cat.remove_unused_categories()
+res = pd.concat(
+    [
+        pg.pairwise_ttests(
+            data=data, parametric=False, dv=v, between="group"
+        ).assign(var=v)
+        for v in data.columns[:-1]
+    ]
+).drop("Contrast", axis=1)
+res["p-cor"] = pg.multicomp(res["p-unc"].values, method="fdr_bh")[1]
+res = res.merge(pd.Series(panel, name="panel").rename_axis("var").reset_index())
+res.to_csv("diff.detailed2.csv", index=False)

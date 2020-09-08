@@ -7,11 +7,13 @@ Generation of supplementary tables
 import json
 from copy import deepcopy
 
-
 import pandas as pd  # type: ignore[import]
 import numpy as np  # type: ignore[import]
+import pingouin as pg
+from scipy.stats import fisher_exact
+import scipy
 
-from src.conf import Path, meta, matrix, panels as _panels
+from src.conf import Path, meta, matrix, panels as _panels, data_dir
 
 
 def save_excel(df: pd.DataFrame, output_file: Path, sheet_name: str) -> None:
@@ -100,11 +102,7 @@ flow.columns = (
 flow = flow.sort_index(1)
 save_excel(flow, output_dir / "Supplementary_Table3.xlsx", "Immune panels")
 
-
-import pingouin as pg
-from scipy.stats import fisher_exact
-import scipy
-
+#
 meta = meta.sort_values("time_symptoms").drop_duplicates("patient_code")
 
 sevs = meta["severity_group"].cat.categories.tolist()
@@ -203,4 +201,11 @@ for i, text in enumerate(statements):
 
 save_excel(
     res, output_dir / "Supplementary_Table1-auto.xlsx", "Patient data summary"
+)
+
+
+# Counts
+counts = pd.read_parquet(data_dir / "matrix.counts.pq").sort_index()
+save_excel(
+    counts, output_dir / "Supplementary_Table6.xlsx", "Immune populations"
 )

@@ -153,3 +153,19 @@ for cat_var in categories:
 
         grid.savefig(figfile)
         plt.close(grid.fig)
+
+
+import pingouin as pg
+
+m = matrix.join(meta[["severity_group"]])
+m["severity_group"] = m["severity_group"].cat.remove_unused_categories()
+res = pd.concat(
+    [
+        pg.pairwise_ttests(
+            data=m, dv=var, between="severity_group", parametric=False
+        ).assign(variable=var)
+        for var in m.columns[:-1]
+    ]
+).drop(["Contrast"], axis=1)
+res["p-cor"] = pg.multicomp(res["p-unc"].values, method="fdr_bh")[1]
+res.to_csv("diff.absolute.csv", index=False)
