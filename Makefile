@@ -34,6 +34,21 @@ metadata/facs_dates.reduced.csv:
 get_batch: metadata/facs_dates.reduced.csv  ## Parse processing date from FCS metadata
 
 
+# Get data as h5ad files
+data/h5ad/__done__:
+	python -u \
+		src/get_h5ad.py \
+			2>&1 | tee log/get_h5ad.$(DATE).log
+get_h5ad: data/h5ad/__done__   ## Download h5ad files
+
+metadata/facs_dates.reduced.csv:
+	$(info    Parsing batch date out of FCS files)
+	python -u \
+		src/parse_batch.py \
+			2>&1 | tee log/parse_batch.$(DATE).log
+get_batch: metadata/facs_dates.reduced.csv  ## Parse processing date from FCS metadata
+
+
 # Metadata / data cleanup
 data/matrix.pq:
 	$(info    Parsing original data into metadata and matrix data)
@@ -77,13 +92,13 @@ results/supervised/__done__: data/matrix_imputed.pq
 	python -u \
 		src/supervised_plot_jointly.py \
 			2>&1 | tee log/supervised_plot_jointly.$(DATE).log
-supervis	ed: results/supervised/__done__  ## Run supervised analysis
+supervised: results/supervised/__done__  ## Run supervised analysis
 results/temporal/__done__: data/fcs/__done__
 	$(info    Running single cell analysis)
 	python -u \
 		src/temporal.py \
 			2>&1 | tee log/temporal.$(DATE).log
-temporal	: results/temporal/__done__  ## Run temporal analysis
+temporal: results/temporal/__done__  ## Run temporal analysis
 results/single_cell/__done__: data/fcs/__done__
 	$(info    Running single cell analysis)
 	python -u \

@@ -54,6 +54,12 @@ class Path(pathlib.Path):
             return pathlib.Path(str(self)).iterdir()
         return iter([])
 
+    def mkdir(self, exist_ok=True, parents=True):
+        try:
+            super().mkdir(exist_ok=exist_ok)
+        except FileExistsError:
+            pass
+
 
 class Model(TypedDict):
     covariates: List[str]

@@ -6,6 +6,8 @@
 - [This CSV file](data/original/clinical_data.joint.20200723.csv) contains the original manually curated data
 - The [metadata](metadata) directory contains parsed/further curated metadata
 - Raw data (e.g. CSV or FCS files) will be under the [data](data) directory.
+    - FCS files can be get from Cytobank (requires account, described below).
+    - H5ad files [can be get from the following URLs](metadata/h5ad_urls.json) using the `make get_h5ad` command (see more below).
 - The [src](src) directory contains source code used to analyze the data
 - A [Makefile](Makefile) is provided to allow easy execution of task blocks.
 - Outputs from the analysis will be present in a `results` directory, with subfolders pertaining to each part of the analysis described below.
@@ -32,6 +34,7 @@ Available commands:
 help            Display help and quit
 requirements    Install software requirements with pip
 get_fcs         Download FCS files from Cytobank
+get_h5ad        Download H5ad files
 get_batch       Parse processing date from FCS metadata
 parse           Parse original data into metadata and matrix data
 impute          Imputation of missing FACS data
@@ -69,3 +72,5 @@ virtualenv .venv
 source activate .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### Raw data
