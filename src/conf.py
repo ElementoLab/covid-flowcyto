@@ -3,8 +3,11 @@
 """
 """
 
-import json
+
 from typing import Union, TypedDict, List, Dict, Optional, Tuple
+import json
+import os
+import pathlib
 
 import pandas as pd
 import numpy as np
@@ -13,8 +16,43 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 
-from imc.types import Path
-import imc  # this import is here to allow automatic colorbars in clustermap
+from seaborn_extensions import activate_annotated_clustermap
+
+
+activate_annotated_clustermap()
+
+
+class Path(pathlib.Path):
+    """
+    A pathlib.Path child class that allows concatenation with strings using the
+    addition operator.
+
+    In addition, it implements the ``startswith`` and ``endswith`` methods
+    just like in the base :obj:`str` type.
+    """
+
+    _flavour = (
+        pathlib._windows_flavour  # type: ignore[attr-defined]  # pylint: disable=W0212
+        if os.name == "nt"
+        else pathlib._posix_flavour  # type: ignore[attr-defined]  # pylint: disable=W0212
+    )
+
+    def __add__(self, string: str) -> "Path":
+        return Path(str(self) + string)
+
+    def startswith(self, string: str) -> bool:
+        return str(self).startswith(string)
+
+    def endswith(self, string: str) -> bool:
+        return str(self).endswith(string)
+
+    def replace_(self, patt: str, repl: str) -> "Path":
+        return Path(str(self).replace(patt, repl))
+
+    def iterdir(self):
+        if self.exists():
+            return pathlib.Path(str(self)).iterdir()
+        return iter([])
 
 
 class Model(TypedDict):
