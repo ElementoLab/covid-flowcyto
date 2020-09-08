@@ -1,5 +1,7 @@
 import scanpy as sc
 
+import pingouin as pg
+
 from src.conf import *
 
 panel_name = "WB_IgG_IgM"
@@ -162,3 +164,21 @@ for marker in markers:
     # pos = x.groupby(['patient_code', 'severity_group', 'loc'])['mpos'].sum().dropna()
 
     # sns.swarmplot(data=((pos / size).dropna() * 100).reset_index(), x='loc', y=0, hue='severity_group')
+
+
+_res = list()
+for marker in ["sIgG(FITC-A)", "sIgM(APC-A)"]:
+    for loc in x["loc"].unique():
+        data2 = x.query(f"loc == '{loc}'")
+        tot = data2.groupby(data2["sample"]).size()
+        pos = (data2[marker] > 0).groupby(data2["sample"]).sum()
+        per = (pos / tot).to_frame().join(meta["severity_group"])
+        _res.append(
+            pg.pairwise_ttests(data=per, dv=0, between="severity_group").assign(
+                marker=marker, loc=loc
+            )
+        )
+
+res = pd.concat(_res)
+res["p-cor"] = pg.multicomp(res["p-unc"].values, method="fdr_bh")[1]
+res.to_csv("diff.detailed6.csv", index=False)

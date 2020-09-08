@@ -68,7 +68,12 @@ meta["sex"] = (
     .str.replace("f", "Female", case=False)
 )
 
-meta['race'] = meta['race'].replace("non-hispanic", "white").replace("caucasian", "white").replace("no record", np.nan)
+meta["race"] = (
+    meta["race"]
+    .replace("non-hispanic", "white")
+    .replace("caucasian", "white")
+    .replace("no record", np.nan)
+)
 
 # reverse the name of death/live
 meta["death"] = meta["alive"]
@@ -352,3 +357,4 @@ counts = counts.rename(columns={c: c + "/LY" for c in cols})
 counts *= 1e3
 
 counts.astype(int).to_parquet(data_dir / "matrix.counts.pq")
+counts.astype(int).to_csv(data_dir / "matrix.counts.csv")

@@ -1,0 +1,20 @@
+{
+    "raw": {
+        "PBMC_MDSC": "https://wcm.box.com/shared/static/v6ie76o543hltdobexmo4u4mc9k3wphb",
+        "WB_Checkpoint": "https://wcm.box.com/shared/static/wewk15tq6tuj51vrw9nodysttohsf4rg",
+        "WB_IgG_IgM": "https://wcm.box.com/shared/static/qzkgtpup8zicxtbo3i563svmgnhuswgt",
+        "WB_Memory": "https://wcm.box.com/shared/static/6vme42akj4ix23a3rpyvdoplu0zyiy9x",
+        "WB_NK_KIR": "https://wcm.box.com/shared/static/lvm77meipxok301pmoo7os0gkagamdgf",
+        "WB_T3": "https://wcm.box.com/shared/static/lm5gl3m498nghz6the4yd0a6d2gytq90",
+        "WB_Treg": "https://wcm.box.com/shared/static/pdd6ll3dsdiuyvkelq1p2nfe6tozdxhf"
+    },
+    "processed": {
+        "PBMC_MDSC": "https://wcm.box.com/shared/static/w2qfr4hlp04r0lmfekawknr7409stjvl",
+        "WB_Checkpoint": "https://wcm.box.com/shared/static/gz7twldvj3b5sktqvzwqgf0mt9hm37fz",
+        "WB_IgG_IgM": "https://wcm.box.com/shared/static/n2wmbkn059yceyqdwl1gwimiexnj3u0p",
+        "WB_Memory": "https://wcm.box.com/shared/static/gozh5dhdeuv3qbwwl69xgra0neaoxnar",
+        "WB_NK_KIR": "https://wcm.box.com/shared/static/711t65w159jluytos37wis7v2zcp7yyh",
+        "WB_T3": "https://wcm.box.com/shared/static/lymvwyvnpc23tuxp7aw95xv5e9rx7355",
+        "WB_Treg": "https://wcm.box.com/shared/static/55na8c2rfxvlwjjxk4ot801o6kafx7rg"
+    }
+}

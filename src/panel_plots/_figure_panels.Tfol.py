@@ -2,6 +2,7 @@ import string
 
 import scanpy as sc
 from mpl_toolkits.mplot3d import Axes3D
+import pingouin as pg
 
 from src.conf import *
 
@@ -133,3 +134,16 @@ grid.fig.savefig(
     / "Tfol.CD185_vs_PD1.population_quantification.swarm_boxenplot.svg",
     **figkws,
 )
+
+
+res = pd.concat(
+    [
+        pg.pairwise_ttests(
+            data=res_a, parametric=False, dv=v, between="severity_group"
+        ).assign(var=v)
+        for v in res_a.columns[:-1]
+    ]
+).drop("Contrast", axis=1)
+# the relevant population for the main figure is "f"
+res["p-cor"] = pg.multicomp(res["p-unc"].values, method="fdr_bh")[1]
+res.to_csv("diff.detailed4.csv", index=False)

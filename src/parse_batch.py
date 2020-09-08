@@ -6,8 +6,8 @@ This script finds the processing date of each sample from the FCS metadata.
 
 import struct
 
-import pandas as pd
-import flowkit as fk
+import pandas as pd  # type: ignore[import]
+import flowkit as fk  # type: ignore[import]
 
 from src.conf import *
 

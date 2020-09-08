@@ -1,5 +1,6 @@
 import scanpy as sc
 
+import pingouin as pg
 
 from src.conf import *
 
@@ -34,6 +35,13 @@ fraction_pat = (
     .set_index("sample_id")[["severity_group"]]
     .join((neg_pat / total_pat).rename("fraction") * 100)
 )
+
+
+res = pg.pairwise_ttests(
+    data=fraction_pat, dv="fraction", between="severity_group", parametric=False
+)
+res["p-cor"] = pg.multicomp(res["p-unc"].values, method="fdr_bh")[1]
+res.to_csv("diff.detailed5.csv", index=False)
 
 
 fig, ax = plt.subplots(1, 1, figsize=(4, 0.8))

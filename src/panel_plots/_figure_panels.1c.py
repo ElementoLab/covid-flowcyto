@@ -6,6 +6,8 @@
 
 import re
 
+import pingouin as pg
+
 from src.conf import *
 
 
@@ -60,6 +62,7 @@ meta["group"] = pd.Categorical(
     ],
     ordered=True,
 )
+# convalescent won't be here
 
 cat_var = "group"
 panel_name = "Major"
@@ -72,7 +75,7 @@ data = (
     matrix.loc[:, v]
     .join(meta[[cat_var]])
     .melt(id_vars=[cat_var], var_name="population", value_name="abundance (%)",)
-)
+).dropna()  # these nan's are the convalescent
 
 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["forestgreen", "gray", "purple"]
@@ -110,3 +113,25 @@ for ax in grid.axes.flat:
 
 grid.savefig(figfile)
 plt.close(grid.fig)
+
+
+data = (matrix.loc[:, v].join(meta[[cat_var]])).dropna()
+
+groups = (
+    data["group"]
+    .value_counts()[data["group"].value_counts() > 1]
+    .index.tolist()
+)
+data = data.loc[data["group"].isin(groups), :]
+data["group"] = data["group"].cat.remove_unused_categories()
+res = pd.concat(
+    [
+        pg.pairwise_ttests(
+            data=data, parametric=False, dv=v, between="group"
+        ).assign(var=v)
+        for v in data.columns[:-1]
+    ]
+).drop("Contrast", axis=1)
+res["p-cor"] = pg.multicomp(res["p-unc"].values, method="fdr_bh")[1]
+res = res.merge(pd.Series(panel, name="panel").rename_axis("var").reset_index())
+res.to_csv("diff.detailed1.csv", index=False)
