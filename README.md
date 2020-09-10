@@ -1,4 +1,12 @@
-# COVID19 profiling of peripheral immune system with flow cytometry
+# COVID-19 immunological profiling with flow cytometry
+
+Source code for manuscript:
+
+"*Longitudinal immune profiling of mild and severe COVID-19 reveals innate and adaptive immune dysfunction and provides an early prediction tool for clinical progression*"
+
+https://doi.org/10.1101/2020.09.08.20189092
+
+medRxiv, 2020/09/09
 
 
 ## Organization
