@@ -4,9 +4,11 @@ Source code for manuscript:
 
 "*Longitudinal immune profiling of mild and severe COVID-19 reveals innate and adaptive immune dysfunction and provides an early prediction tool for clinical progression*"
 
-https://doi.org/10.1101/2020.09.08.20189092
+Posted on medRxiv, 2020/09/09: https://doi.org/10.1101/2020.09.08.20189092
 
-medRxiv, 2020/09/09
+Published on Life Science Alliance, 2020/12/24: https://doi.org/10.26508/lsa.202000955 as
+
+"*Profiling of immune dysfunction in COVID-19 patients allows early prediction of disease progression*"
 
 
 ## Organization
