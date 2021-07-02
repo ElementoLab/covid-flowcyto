@@ -13,7 +13,7 @@ Published on Life Science Alliance, 2020/12/24: https://doi.org/10.26508/lsa.202
 
 ## Organization
 
-- [This CSV file](data/original/clinical_data.joint.20200723.csv) contains the original manually curated data
+- [This CSV file](data/original/clinical_data.joint.20200803.csv) contains the original manually curated data
 - The [metadata](metadata) directory contains parsed/further curated metadata
 - Raw data (e.g. CSV, FCS and H5ad files) will be under the [data](data) directory.
     - FCS files can be get from Cytobank (requires account, described below).
